@@ -9,7 +9,9 @@ dev = [
   "pytest-cov>=7.1.0",
   "ruff>=0.16.7",
   "rumdl>=0.2.73",
+  { include-group = "docs" },
 ]
+docs = ["zensical>=0.0.62"]
 
 [project]
 authors = [{ name = "Cariad Eccleston", email = "cariad@cariad.earth" }]
