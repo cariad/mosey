@@ -1,0 +1,73 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[dependency-groups]
+dev = [
+  "pyright>=1.1.414",
+  "pytest>=9.1.1",
+  "pytest-cov>=7.1.0",
+  "ruff>=0.16.7",
+  "rumdl>=0.2.73",
+]
+
+[project]
+authors = [{ name = "Cariad Eccleston", email = "cariad@cariad.earth" }]
+description = "A directory walker that respects ignore-files"
+license = "MIT"
+name = "mosey"
+readme = "README.md"
+requires-python = ">=3.11"
+version = "0.1.0"
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+skip_covered = true
+
+[tool.coverage.run]
+branch = true
+source = ["mosey"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"
+
+[tool.pytest.ini_options]
+addopts = "--cov"
+log_level = "DEBUG"
+testpaths = ["tests"]
+
+[tool.ruff.format]
+line-ending = "lf"
+
+[tool.ruff.lint]
+select = [
+  "ANN", # Require all type annotations
+  "B",   # flake8-bugbear
+  "D",   # pydocstyle
+  "E",   # pycodestyle errors
+  "F",   # pyflakes
+  "G",   # flake8-logging-format
+  "I",   # isort
+  "LOG", # flake8-logging
+  "RUF", # ruff's own rules
+  "SIM", # flake8-simplify
+  "UP",  # pyupgrade
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.rumdl]
+disable = [
+  "MD013", # Maximum line length
+]
+
+[tool.rumdl.no-trailing-spaces]
+br-spaces = 0 # Don't use trailing whitespace as line breaks
+
+[tool.uv]
+# NOTE: uv is pre-1.0 and minor releases may break our usage. Bump this
+# NOTE: deliberately after reading the changelog and testing.
+required-version = ">=0.12.7, <0.13"
