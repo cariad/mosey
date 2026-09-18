@@ -11,7 +11,10 @@ dev = [
   "rumdl>=0.2.73",
   { include-group = "docs" },
 ]
-docs = ["zensical>=0.0.62"]
+docs = [
+  "mkdocstrings-python>=2.0.8",
+  "zensical>=0.0.62",
+]
 
 [project]
 authors = [{ name = "Cariad Eccleston", email = "cariad@cariad.earth" }]
