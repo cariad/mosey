@@ -15,6 +15,7 @@ docs = ["zensical>=0.0.62"]
 
 [project]
 authors = [{ name = "Cariad Eccleston", email = "cariad@cariad.earth" }]
+classifiers = ["Development Status :: 3 - Alpha"]
 description = "A directory walker that respects ignore-files"
 license = "MIT"
 name = "mosey"
