@@ -1,6 +1,7 @@
 """mosey — a directory walker that respects ignore-files."""
 
+from .step import Step
 
-def main() -> None:
-    """Say hello!"""
-    print("Hello from mosey!")
+__all__ = [
+    "Step",
+]

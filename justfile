@@ -1,4 +1,7 @@
-local: markdown lint typing test
+local: markdown docs lint typing test
+
+docs:
+  uv run zensical build
 
 fix:
   uv run ruff check --fix .
@@ -11,6 +14,9 @@ lint:
 
 markdown:
   uv run rumdl check .
+
+start-docs:
+  uv run zensical serve
 
 test:
   uv run pytest

@@ -31,7 +31,13 @@ jobs:
 
       # Run every check even when an earlier one fails, so a single push
       # surfaces all the problems at once. Skip them if setup failed.
-      - run: just lint
+      #
+      # The API reference is generated from docstrings, so a source change
+      # can break the site. Build it here rather than discover that on `main`.
+      - run: just docs
+
+      - if: ${{ !cancelled() && steps.just.outcome == 'success' }}
+        run: just lint
 
       - if: ${{ !cancelled() && steps.just.outcome == 'success' }}
         run: just markdown

@@ -1,6 +1,11 @@
 [project]
 copyright = "&copy; 2026 Cariad Eccleston"
-nav = [{ "Get started" = "index.md" }]
+nav = [
+  { "Get started" = "index.md" },
+  { "API reference" = [
+    { "Step" = "api/step.md" },
+  ] },
+]
 repo_name = "cariad/mosey"
 repo_url = "https://github.com/cariad/mosey"
 site_author = "Cariad Eccleston"
@@ -9,10 +14,34 @@ site_name = "Mosey documentation"
 site_url = "https://cariad.github.io/mosey/"
 strict = true
 
+# mkdocstrings generates API references from docstrings.
+[project.plugins.mkdocstrings.handlers.python]
+inventories = [
+  "https://docs.python.org/3/objects.inv", # Enable links to standard library types
+]
+paths = ["src"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+filters = ["!^_"]                 # Hide private and dunder members
+merge_init_into_class = true      # Describe `__init__` alongside its class
+scoped_crossrefs = true           # Resolve [`name`][] links like Python resolves names
+separate_signature = true         # Show signatures below headings, not within them
+show_root_heading = true          # Render a heading for the documented object itself
+show_signature_annotations = true # Include type annotations in signatures
+show_symbol_type_heading = true   # "class", "attr", etc. badges in headings
+show_symbol_type_toc = true       # …and in the table of contents
+show_labels = false               # Show if an attribute is an instance-attribute, property, etc.
+signature_crossrefs = true        # Link types in signatures to their documentation
+
+[project.plugins.mkdocstrings.handlers.python.options.docstring_options]
+ignore_init_summary = true # Ignore the first line in __init__ methods' docstrings.
+
 [project.theme]
 features = [
   "content.code.copy", # Copy button in code blocks
   "content.tabs.link", # Content tabs that share a label switch together
+  "content.tooltips",  # Render link titles, which mkdocstrings writes as HTML
 ]
 
 [project.theme.icon]
