@@ -1,4 +1,7 @@
-local: markdown docs lint typing test
+local: markdown docs lint typing test actions
+
+actions:
+  uv run --group actions actionlint ${ACTIONLINT_FORMAT:+-format "$ACTIONLINT_FORMAT"}
 
 docs:
   uv run zensical build
