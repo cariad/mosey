@@ -3,6 +3,29 @@ build-backend = "hatchling.build"
 requires = ["hatchling"]
 
 [dependency-groups]
+# We don't include `actionlint` in `dev` because it builds from source and downloads a
+# binary from GitHub, which the test matrix in CI doesn't need.
+#
+# With that in mind, splitting `dev` into `lint` and `test` groups feels like an obvious
+# optimisation but it adds more complexity than it's worth:
+#
+# - `uv run` syncs the default groups, so `just test` would reinstall all of `dev`
+#   anyway unless the test job also set `UV_NO_SYNC`.
+# - `--only-group test` omits the project itself, so the test job would need
+#   `--no-default-groups --group test` instead.
+# - `pyright` needs `pytest` to type-check the tests, so the lint job would need both
+#   groups anyway.
+# - `actionlint-py` would join every contributor's default `uv sync`, which would then
+#   fail outright without access to github.com.
+#
+# `actionlint-py` is a special case because it downloads a binary. We don't need to go
+# this far for anything else.
+actions = [
+  "actionlint-py>=1.7.12.24",
+  # We never call `shellcheck` directly; `actionlint` uses it if it's installed, and
+  # skips tests if not. So, we install it!
+  "shellcheck-py>=0.11.0.1",
+]
 dev = [
   "pyright>=1.1.414",
   "pytest>=9.1.1",
@@ -74,6 +97,15 @@ disable = [
 br-spaces = 0 # Don't use trailing whitespace as line breaks
 
 [tool.uv]
-# NOTE: uv is pre-1.0 and minor releases may break our usage. Bump this
-# NOTE: deliberately after reading the changelog and testing.
+# NOTE: uv is pre-1.0 and minor releases may break our usage. Bump this deliberately
+# NOTE: after reading the changelog and testing.
 required-version = ">=0.12.7, <0.13"
+
+[tool.uv.extra-build-dependencies]
+# `actionlint-py` is published as a source distribution and `uv.lock` doesn't pin its
+# build dependencies, which include the deprecated `wheel.bdist_wheel` and `distutils`,
+# so cap the last versions known to build it.
+actionlint-py = [
+  "setuptools<85",
+  "wheel<0.49",
+]
