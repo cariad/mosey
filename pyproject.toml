@@ -50,12 +50,25 @@ requires-python = ">=3.11"
 version = "0.1.0"
 
 [tool.coverage.report]
-fail_under = 100
+# This project contains portions of operating system-specific code (for example, code to
+# handle specific error conditions in Windows vs Linux vs macOS), so a test run on any
+# single machine is never expected to touch every line.
+#
+# So, 100% coverage isn't possible locally -- but 90% feels reasonable.
+#
+# When a pull request is opened against `main`, `.github/workflows/verify.yml` runs the
+# tests in Windows, Linux, and macOS runners, then gathers the results and ensures every
+# line was tested by at least one operating system before allowing the change to be
+# merged.
+fail_under = 90
 show_missing = true
 skip_covered = true
 
 [tool.coverage.run]
 branch = true
+# Save coverage results relative to the project so `.github/workflows/verify.yml` can
+# combine data from across operating systems
+relative_files = true
 source = ["mosey"]
 
 [tool.pyright]

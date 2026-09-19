@@ -54,6 +54,10 @@ jobs:
         run: just typing
 
   test:
+    env:
+      # Give each job's coverage data a unique name so the `coverage` job can gather
+      # them all into one directory.
+      COVERAGE_FILE: .coverage.${{ matrix.os }}-${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -82,3 +86,46 @@ jobs:
           just-version: 1.58.0
 
       - run: just test
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          if-no-files-found: error
+          # The coverage data file is a dotfile:
+          include-hidden-files: true
+          name: coverage-${{ matrix.os }}-${{ matrix.python-version }}
+          path: ${{ env.COVERAGE_FILE }}
+          retention-days: 1
+
+  # This project contains portions of operating system-specific code (for example, code
+  # to handle specific error conditions in Windows vs Linux vs macOS), so a test run on
+  # any single machine is never expected to touch every line.
+  #
+  # So, here in CI, we run the tests in a matrix of operating systems, gather their
+  # coverage, then assert that every line of code was touched by at least one of them.
+  coverage:
+    # By default, this job would be skipped if any `test` job fails, and GitHub treats a
+    # skipped job as a passed status check.
+    #
+    # So, always run, then fail explicitly if the tests didn't succeed.
+    if: ${{ !cancelled() }}
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - if: ${{ needs.test.result != 'success' }}
+        run: exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          cache-python: true
+
+      - run: uv sync --locked
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          merge-multiple: true
+          pattern: coverage-*
+
+      - run: uv run coverage combine
+      - run: uv run coverage report --fail-under=100
