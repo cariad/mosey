@@ -3,6 +3,7 @@ copyright = "&copy; 2026 Cariad Eccleston"
 nav = [
   { "Get started" = "index.md" },
   { "API reference" = [
+    { "Mosey" = "api/mosey.md" },
     { "Step" = "api/step.md" },
   ] },
 ]
