@@ -5,6 +5,7 @@ import sys
 
 from pytest import mark, param
 
+from mosey.candidate import Candidate
 from mosey.paths import sort_key
 
 requires_utf8 = mark.skipif(
@@ -13,19 +14,55 @@ requires_utf8 = mark.skipif(
 )
 
 
-def test_sort_key__file() -> None:
-    """A file's key is its name."""
-    assert sort_key("foo.txt", False) == b"foo.txt"
-
-
-def test_sort_key__directory() -> None:
-    """A directory's key is its name with a trailing slash."""
-    assert sort_key("foo", True) == b"foo/"
+@mark.parametrize(
+    ("candidate", "expect"),
+    [
+        param(
+            ("foo.txt", False),
+            b"foo.txt",
+            id="file",
+        ),
+        param(
+            ("foo", True),
+            b"foo/",
+            id="directory",
+        ),
+        param(
+            ("café", False),
+            b"caf\xc3\xa9",
+            id="non-ascii",
+            marks=requires_utf8,
+        ),
+        # The key encodes the name it's given and never normalises it. "café" above
+        # spells "é" as the single code point U+00E9, and this spells it as "e" then the
+        # combining accent U+0301, so the two get different keys.
+        #
+        # Git compares bytes too, so it usually tells them apart in the same way. The
+        # exception is macOS, where `git init` and `git clone` turn on
+        # `core.precomposeunicode`: Git then converts the second spelling to the first,
+        # so its order can differ from ours.
+        param(
+            ("cafe\u0301", False),
+            b"cafe\xcc\x81",
+            id="decomposed",
+            marks=requires_utf8,
+        ),
+        param(
+            ("\U0001f600", False),
+            b"\xf0\x9f\x98\x80",
+            id="four-byte-character",
+            marks=requires_utf8,
+        ),
+    ],
+)
+def test_sort_key(candidate: Candidate, expect: bytes) -> None:
+    """A candidate's key is its filename as bytes, plus a slash if it's a directory."""
+    assert sort_key(candidate) == expect
 
 
 def test_sort_key__file_before_directory() -> None:
     """A file precedes a directory sharing its prefix if its next byte is below "/"."""
-    assert sort_key("b.txt", False) < sort_key("b", True)
+    assert sort_key(("b.txt", False)) < sort_key(("b", True))
 
 
 @mark.parametrize(
@@ -39,7 +76,7 @@ def test_sort_key__file_before_directory() -> None:
 )
 def test_sort_key__encodes_like_fsencode(name: str) -> None:
     """A name is encoded the same way `os.fsencode` would encode it."""
-    assert sort_key(name, False) == os.fsencode(name)
+    assert sort_key((name, False)) == os.fsencode(name)
 
 
 @requires_utf8
@@ -57,7 +94,7 @@ def test_sort_key__undecodable_name__posix() -> None:
     #
     # But git compares the raw bytes, where 0x80 comes *before* the 0xC3 that starts
     # "é", so "\udc80" must sort first.
-    assert sort_key("\udc80", False) < sort_key("é", False)
+    assert sort_key(("\udc80", False)) < sort_key(("é", False))
 
 
 @requires_utf8
@@ -67,9 +104,9 @@ def test_sort_key__undecodable_name__posix() -> None:
 )
 def test_sort_key__undecodable_name__windows() -> None:
     """Windows encodes an unpaired surrogate as three bytes that sort after "é"."""
-    key = sort_key("\udc80", False)
+    key = sort_key(("\udc80", False))
     assert key == b"\xed\xb2\x80"
-    assert key > sort_key("é", False)
+    assert key > sort_key(("é", False))
 
 
 def test_sort_key__git_order() -> None:
@@ -87,7 +124,7 @@ def test_sort_key__git_order() -> None:
     # Verified against `git ls-files` with a file inside the "b" directory. Uppercase
     # sorts before lowercase, then "-" (0x2d), "." (0x2e), "/" (0x2f), "_" (0x5f) and
     # "a" (0x61) decide the ties on "b".
-    assert sorted(entries, key=lambda entry: sort_key(entry[0], entry[1])) == [
+    assert sorted(entries, key=sort_key) == [
         ("Z", False),
         ("a", False),
         ("b-c", False),
@@ -111,9 +148,9 @@ def test_sort_key__git_order__raw_bytes() -> None:
         ("z", False),
     ]
 
-    assert sort_key("\udc80", True) == b"\x80/"
+    assert sort_key(("\udc80", True)) == b"\x80/"
 
-    assert sorted(entries, key=lambda entry: sort_key(entry[0], entry[1])) == [
+    assert sorted(entries, key=sort_key) == [
         ("z", False),
         ("\udc80", True),
         ("é", False),
