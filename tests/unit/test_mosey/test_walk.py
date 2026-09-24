@@ -18,7 +18,7 @@ from tests.file_system_helpers import (
     make_symlink_to_directory,
     make_symlink_to_file,
 )
-from tests.markers import needs_posix_permissions, needs_symlinks
+from tests.markers import needs_fifos, needs_posix_permissions, needs_symlinks
 
 
 @mark.parametrize(
@@ -77,13 +77,7 @@ def test_root_is_beneath_a_file__cause(tmp_path: Path) -> None:
 @mark.parametrize(
     "make",
     [
-        param(
-            make_fifo,
-            marks=mark.skipif(
-                not hasattr(os, "mkfifo"),
-                reason="FIFOs can't be created on this platform",
-            ),
-        ),
+        param(make_fifo, marks=needs_fifos),
         make_file,
         param(make_symlink_to_file, marks=needs_symlinks),
     ],
