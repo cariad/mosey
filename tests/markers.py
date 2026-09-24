@@ -7,6 +7,21 @@ from pytest import mark
 
 from tests.file_system_helpers import can_make_symlinks
 
+needs_fifos = mark.skipif(
+    not hasattr(os, "mkfifo"),
+    reason="FIFOs can't be created on this platform",
+)
+"""Skips a test that relies on creating FIFOs (named pipes).
+
+Windows has no `os.mkfifo`, and neither do some other builds of Python.
+"""
+
+needs_junctions = mark.skipif(
+    sys.platform != "win32",
+    reason="Only Windows has junctions",
+)
+"""Skips a test that relies on creating junctions, which only Windows has."""
+
 needs_posix_permissions = mark.skipif(
     # Not every build of Python has `os.geteuid`, so we need to check for it.
     #
