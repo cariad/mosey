@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from mosey import Mosey
+
 
 def can_make_symlinks() -> bool:
     """Check if symlinks can be created.
@@ -221,6 +223,18 @@ def make_tree(root: Path, *paths: str) -> None:
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             make_file(target)
+
+
+def relative_paths(root: Path) -> list[str]:
+    """Walk a directory and return every step's relative path, in order.
+
+    Args:
+        root: Path to the directory to walk.
+
+    Returns:
+        The relative path of every step.
+    """
+    return [step.relative_as_posix for step in Mosey().walk(root)]
 
 
 def symlink_target(path: Path) -> Path:

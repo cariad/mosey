@@ -1,8 +1,5 @@
 """A directory walker that respects ignore-files.
 
-Mosey is still in early development, so expect `NotImplementedError` to be raised early
-and often where functionality is missing. See `ROADMAP.md` for the plan.
-
 Everything public is exported by this package, so import from here rather than from the
 submodules.
 
