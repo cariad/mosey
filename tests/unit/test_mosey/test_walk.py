@@ -6,7 +6,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
-from pytest import mark, param, raises
+from pytest import MonkeyPatch, mark, param, raises
 
 from mosey import Mosey
 from tests.file_system_helpers import (
@@ -17,6 +17,8 @@ from tests.file_system_helpers import (
     make_nothing,
     make_symlink_to_directory,
     make_symlink_to_file,
+    make_tree,
+    relative_paths,
 )
 from tests.markers import needs_fifos, needs_posix_permissions, needs_symlinks
 
@@ -223,6 +225,27 @@ def test_root_search_is_denied(tmp_path: Path) -> None:
         root.chmod(0o700)
 
 
+def test_walk__git_order(tmp_path: Path) -> None:
+    """Files are yielded in the order that Git lists them."""
+    # Created in neither the expected order nor its reverse, so the test can't pass on
+    # a file system that lists a directory's entries oldest first or newest first.
+    make_tree(tmp_path, "b.txt", "Z", "ba", "b/x", ".a", "b_c", "b-c")
+
+    # Verified against `git ls-files --others`. Uppercase sorts before lowercase, so
+    # "Z" (0x5a) comes before "b" (0x62); a case-insensitive order would put it last.
+    # Then "-" (0x2d), "." (0x2e), "/" (0x2f), "_" (0x5f) and "a" (0x61) decide the
+    # ties on "b".
+    assert relative_paths(tmp_path) == [".a", "Z", "b-c", "b.txt", "b/x", "b_c", "ba"]
+
+
+def test_walk__depth_first(tmp_path: Path) -> None:
+    """Everything inside a directory is yielded before the directory's next sibling."""
+    make_tree(tmp_path, "b", "a/z", "a/b/y", "a/b/c/x")
+
+    # Verified against `git ls-files --others`.
+    assert relative_paths(tmp_path) == ["a/b/c/x", "a/b/y", "a/z", "b"]
+
+
 @mark.parametrize(
     "make",
     [
@@ -230,11 +253,131 @@ def test_root_search_is_denied(tmp_path: Path) -> None:
         param(make_symlink_to_directory, marks=needs_symlinks),
     ],
 )
-def test_walk_is_not_implemented(tmp_path: Path, make: Callable[[Path], None]) -> None:
-    """`NotImplementedError` is raised when the root passes validation."""
-    # TODO: Replace this with real tests when the walk is implemented.
+def test_walk__steps(tmp_path: Path, make: Callable[[Path], None]) -> None:
+    """Each step describes a file beneath the root."""
     root = tmp_path / "root"
     make(root)
+    make_tree(root, "a/b.txt")
 
-    with raises(NotImplementedError):
-        Mosey().walk(root)
+    [step] = Mosey().walk(root)
+
+    assert step.name == "b.txt"
+    assert step.relative_as_posix == "a/b.txt"
+
+    # When the root is a symlink, the walk follows it. Steps keep the path to the
+    # symlink, though, rather than the path to its target.
+    assert step.root == root
+    assert step.path == root / "a" / "b.txt"
+
+
+def test_walk__relative_root(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Steps beneath a relative root have relative paths, without a leading "./"."""
+    make_tree(tmp_path, "a/b.txt")
+    monkeypatch.chdir(tmp_path)
+
+    [step] = Mosey().walk(".")
+
+    assert step.relative_as_posix == "a/b.txt"
+    assert step.root == Path(".")
+    assert step.path == Path("a", "b.txt")
+
+
+@mark.parametrize(
+    "paths",
+    [
+        param((), id="empty"),
+        param(("a/b/", "c/"), id="only-directories"),
+    ],
+)
+def test_walk__no_files(tmp_path: Path, paths: tuple[str, ...]) -> None:
+    """Nothing is yielded when there are no files, because directories aren't."""
+    make_tree(tmp_path, *paths)
+
+    assert relative_paths(tmp_path) == []
+
+
+@needs_symlinks
+def test_walk__symlink_to_file(tmp_path: Path) -> None:
+    """A symlink to a file is yielded as a file."""
+    make_symlink_to_file(tmp_path / "link")
+
+    # Verified against `git ls-files --others`.
+    assert relative_paths(tmp_path) == ["link", "link.target"]
+
+
+@needs_symlinks
+def test_walk__symlink_to_directory(tmp_path: Path) -> None:
+    """A symlink to a directory is yielded as a file, and never walked into."""
+    make_symlink_to_directory(tmp_path / "link")
+    make_tree(tmp_path, "link.target/x")
+
+    # Verified against `git ls-files --others`, which lists symlinks as files too.
+    #
+    # If the walk had followed the symlink, it would have yielded "link/x" as well. If
+    # it had sorted the symlink as a directory, its key "link/" would have come after
+    # "link.target/", because "/" is 0x2f and "." is 0x2e.
+    assert relative_paths(tmp_path) == ["link", "link.target/x"]
+
+
+def test_walk__lazy_root(tmp_path: Path) -> None:
+    """The root isn't listed until the first step is requested."""
+    steps = Mosey().walk(tmp_path)
+    make_file(tmp_path / "a")
+
+    assert [step.relative_as_posix for step in steps] == ["a"]
+
+
+def test_walk__lazy_directories(tmp_path: Path) -> None:
+    """A directory isn't listed until the walk reaches it."""
+    make_tree(tmp_path, "a/x", "b/")
+    steps = Mosey().walk(tmp_path)
+
+    assert next(steps).relative_as_posix == "a/x"
+
+    # The walk has listed the root, so it knows "b" exists, but it hasn't listed "b"
+    # itself yet.
+    make_file(tmp_path / "b" / "y")
+
+    assert [step.relative_as_posix for step in steps] == ["b/y"]
+
+
+def test_walk__directory_vanishes(tmp_path: Path) -> None:
+    """`FileNotFoundError` is raised when the walk reaches a directory that's gone."""
+    make_tree(tmp_path, "a/x", "b/")
+    steps = Mosey().walk(tmp_path)
+
+    assert next(steps).relative_as_posix == "a/x"
+
+    # The walk has listed the root, so it knows "b" exists, but it hasn't listed "b"
+    # itself yet.
+    (tmp_path / "b").rmdir()
+
+    with raises(FileNotFoundError) as raised:
+        next(steps)
+
+    # Proves that it was "b" that couldn't be listed, not the root.
+    assert raised.value.filename == os.fspath(tmp_path / "b")
+
+
+@needs_posix_permissions
+def test_walk__directory_listing_is_denied(tmp_path: Path) -> None:
+    """`PermissionError` is raised when the walk reaches a directory it can't list."""
+    make_tree(tmp_path, "a.txt", "b/")
+    denied = tmp_path / "b"
+
+    # Write and search ("execute") but not read, so "b" can't be listed.
+    denied.chmod(0o300)
+
+    try:
+        steps = Mosey().walk(tmp_path)
+
+        assert next(steps).relative_as_posix == "a.txt"
+
+        with raises(PermissionError) as raised:
+            next(steps)
+
+        # Proves that it was "b" that couldn't be listed, not the root.
+        assert raised.value.filename == os.fspath(denied)
+    finally:
+        # Restore access so pytest can clean up `tmp_path`.
+        denied.chmod(0o700)
