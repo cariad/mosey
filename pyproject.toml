@@ -105,6 +105,7 @@ convention = "google"
 disable = [
   "MD013", # Maximum line length
 ]
+flavor = "mkdocs" # Understand admonitions, content tabs and autorefs in `docs/`
 
 [tool.rumdl.no-trailing-spaces]
 br-spaces = 0 # Don't use trailing whitespace as line breaks

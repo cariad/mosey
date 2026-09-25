@@ -17,76 +17,33 @@ FS_ERRORS: Final[str] = sys.getfilesystemencodeerrors()
 
 
 def sort_key(candidate: Candidate) -> bytes:
-    """Returns the key that sorts a candidate into Git's walk order.
+    """Return the key that sorts a candidate into walk order.
 
-    Git lists files in the order of their full paths, compared byte by byte from the
-    left. We sort one directory at a time, so each directory's entries need to sort in
-    the same order as the paths beneath them would in Git.
-
-    Sorting by name alone doesn't do that. Take this directory:
-
-    ```
-    root/
-    ├── b/
-    │   └── x
-    └── b.txt
-    ```
-
-    Git doesn't list directories, only the full paths of the files inside them, so it
-    sees two paths:
-
-    ```
-    b/x
-    b.txt
-    ```
-
-    Both start with "b", so the second character decides the order. "." is byte 0x2e and
-    "/" is byte 0x2f, so Git lists "b.txt" first:
-
-    ```
-    b.txt
-    b/x
-     ^
-    ```
-
-    We don't see paths, though. We walk one directory at a time, and the root directory
-    has two entries: the directory "b" and the file "b.txt". Sorted by name, "b" comes
-    first because it's shorter:
-
-    ```
-    b
-    b.txt
-    ```
-
-    That's the opposite of Git. We'd walk into "b" and yield "b/x" before "b.txt".
-
-    Appending "/" to the directory's name makes our entries look like Git's paths, so
-    the second character decides again and "b.txt" comes first:
-
-    ```
-    b.txt
-    b/
-     ^
-    ```
-
-    The key is an array of bytes rather than a string because Git sees the raw bytes of
-    a filename, and Python's string comparison doesn't always agree with them.
-
-    Performance considerations:
-
-    - This is called once per object, so it's on the hot path and intentionally doesn't
-      validate.
-    - The name is encoded "manually" via `str.encode` rather than `os.fsencode` because
-      it's about twice as fast in Python 3.11 to 3.14 on arm64 macOS.
-    - The candidate is a single argument, rather than separate name and directory flags,
-      so the function can be passed directly to `list.sort` without needing a lambda in
-      the middle.
+    The walk order is documented at https://cariad.github.io/mosey/walk-order/.
 
     Args:
-        candidate: Candidate.
+        candidate: The candidate to sort.
 
     Returns:
-        Sort key as an array of bytes.
+        The candidate's sort key.
     """
+    # The key is the filename as bytes, with "/" appended if the candidate is a
+    # directory. A walk sorts one directory at a time, and that trailing "/" is what
+    # makes the paths it yields come out in ascending byte order overall.
+    #
+    # The key is bytes rather than a string because the documented order is byte order,
+    # and strings compare by code point instead. The two agree for valid UTF-8, but not
+    # necessarily for names that aren't valid Unicode or under a file system encoding
+    # other than UTF-8.
+    #
+    # NOTE: This is called once per object, so it's on the hot path and intentionally
+    # NOTE: doesn't validate.
+    #
+    # NOTE: The name is encoded "manually" via `str.encode` rather than `os.fsencode`
+    # NOTE: because it's about twice as fast in Python 3.11 to 3.14 on arm64 macOS.
+    #
+    # NOTE: The candidate is a single argument, rather than separate name and directory
+    # NOTE: flags, so that the function can be passed directly to `list.sort` without
+    # NOTE: needing a lambda in the middle.
     key = candidate[0].encode(FS_ENCODING, FS_ERRORS)
     return key + b"/" if candidate[1] else key

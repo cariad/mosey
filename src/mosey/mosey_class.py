@@ -22,31 +22,10 @@ class Mosey:
     def _iterate(self, root: Path, root_str: str) -> Iterator[Step]:
         """Walk a directory and yield a `Step` for every file.
 
+        The walk is depth-first and yields files in the walk order documented at
+        https://cariad.github.io/mosey/walk-order/.
+
         The directory is expected to have been validated before calling.
-
-        The walk is depth-first; when it meets a directory, it walks everything inside
-        that directory before moving onto the directory's next sibling.
-
-        Each directory's entries are sorted into Git's order, so the files come out in
-        the order Git would list them.
-
-        For example, given this directory:
-
-        ```
-        root/
-        ├── b/
-        │   └── x
-        ├── b.txt
-        └── c
-        ```
-
-        ...the walk yields its files in this order:
-
-        ```
-        b.txt
-        b/x
-        c
-        ```
 
         Args:
             root: Path to the directory to walk, exactly as the caller passed it. Each
@@ -112,14 +91,19 @@ class Mosey:
     def walk(self, root: os.PathLike[str] | str) -> Iterator[Step]:
         """Walk a directory and yield a [`Step`][mosey.Step] for every file.
 
+        Files are yielded in a deterministic walk order, documented at
+        https://cariad.github.io/mosey/walk-order/.
+
         Args:
             root: Path to the directory to walk.
 
         Returns:
             An iterator of [`Step`][mosey.Step]; one for every file.
 
-                The iterator raises [`OSError`][] when it can't list a directory beneath
-                `root`, say because it vanished or permissions deny reading it.
+                The iterator raises [`OSError`][] when it can't list `root` or a
+                directory beneath it, say because it vanished or permissions deny
+                reading it. `root` itself isn't listed until the first step is
+                requested.
 
         Raises:
             FileNotFoundError: When `root` is empty, doesn't exist, or can't exist (e.g.
