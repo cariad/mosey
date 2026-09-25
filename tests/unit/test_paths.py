@@ -7,11 +7,7 @@ from pytest import mark, param
 
 from mosey.candidate import Candidate
 from mosey.paths import sort_key
-
-requires_utf8 = mark.skipif(
-    sys.getfilesystemencoding() != "utf-8",
-    reason="Assumes a UTF-8 file system encoding",
-)
+from tests.markers import needs_utf8
 
 
 @mark.parametrize(
@@ -31,7 +27,7 @@ requires_utf8 = mark.skipif(
             ("café", False),
             b"caf\xc3\xa9",
             id="non-ascii",
-            marks=requires_utf8,
+            marks=needs_utf8,
         ),
         # The key encodes the name it's given and never normalises it. "café" above
         # spells "é" as the single code point U+00E9, and this spells it as "e" then the
@@ -40,13 +36,13 @@ requires_utf8 = mark.skipif(
             ("cafe\u0301", False),
             b"cafe\xcc\x81",
             id="decomposed",
-            marks=requires_utf8,
+            marks=needs_utf8,
         ),
         param(
             ("\U0001f600", False),
             b"\xf0\x9f\x98\x80",
             id="four-byte-character",
-            marks=requires_utf8,
+            marks=needs_utf8,
         ),
     ],
 )
@@ -64,7 +60,7 @@ def test_sort_key__file_before_directory() -> None:
     "name",
     [
         "foo",
-        param("café", marks=requires_utf8),
+        param("café", marks=needs_utf8),
         # A lone surrogate is how an undecodable byte in a filename reaches Python.
         "\udc80",
     ],
@@ -74,7 +70,7 @@ def test_sort_key__encodes_like_fsencode(name: str) -> None:
     assert sort_key((name, False)) == os.fsencode(name)
 
 
-@requires_utf8
+@needs_utf8
 @mark.skipif(
     sys.platform == "win32",
     reason="Windows escapes undecodable file names differently",
@@ -92,7 +88,7 @@ def test_sort_key__undecodable_name__posix() -> None:
     assert sort_key(("\udc80", False)) < sort_key(("é", False))
 
 
-@requires_utf8
+@needs_utf8
 @mark.skipif(
     sys.platform != "win32",
     reason="Only Windows escapes unpaired surrogates as three bytes",
@@ -129,7 +125,7 @@ def test_sort_key__order() -> None:
     ]
 
 
-@requires_utf8
+@needs_utf8
 @mark.skipif(
     sys.platform == "win32",
     reason="Windows encodes an unpaired surrogate as three bytes, not one",

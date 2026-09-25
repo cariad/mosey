@@ -20,7 +20,12 @@ from tests.file_system_helpers import (
     make_tree,
     relative_paths,
 )
-from tests.markers import needs_fifos, needs_posix_permissions, needs_symlinks
+from tests.markers import (
+    needs_fifos,
+    needs_posix_permissions,
+    needs_symlinks,
+    needs_utf8,
+)
 
 
 @mark.parametrize(
@@ -236,6 +241,7 @@ def test_walk__order(tmp_path: Path) -> None:
     assert relative_paths(tmp_path) == [".a", "Z", "b-c", "b.txt", "b/x", "b_c", "ba"]
 
 
+@needs_utf8
 def test_walk__ascending_paths(tmp_path: Path) -> None:
     """Files are yielded in ascending byte order of their relative paths."""
     # The example from the walk-order page, created in neither the expected order nor

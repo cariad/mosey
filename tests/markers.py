@@ -54,3 +54,14 @@ needs_symlinks = mark.skipif(
     reason="Windows needs admin rights or Developer Mode to create symlinks",
 )
 """Skips a test that relies on creating symlinks, unless running in CI."""
+
+needs_utf8 = mark.skipif(
+    sys.getfilesystemencoding() != "utf-8",
+    reason="Assumes a UTF-8 file system encoding",
+)
+"""Skips a test whose names or expected bytes assume a UTF-8 file system encoding.
+
+Python uses UTF-8 on Windows, on macOS, and on Linux under a UTF-8 locale or in UTF-8
+mode. A Linux system with a legacy locale, and both UTF-8 mode and locale coercion
+switched off, reports something else, and can't create a name like "café".
+"""
