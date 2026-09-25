@@ -55,17 +55,7 @@ class Step:
     Fast to read. The filename is in [`relative_as_posix`][] too, and included here for
     convenience.
 
-    The filename is exactly as the file system stores it. On macOS, that isn't always
-    how Git spells it. An accented letter can be stored "decomposed", as a letter then
-    a combining accent, and Git then usually reports it "composed", as one character:
-
-    ```
-    Stored, and reported by mosey:  "e" then U+0301  (bytes 65 CC 81)
-    Reported by Git:                U+00E9           (bytes C3 A9)
-    ```
-
-    Git does this when `core.precomposeunicode` is on, which `git init` and `git clone`
-    turn on for repositories on macOS.
+    It's spelled exactly as the file system reports it, without any translation.
     """
 
     relative_as_posix: Final[str]
@@ -81,7 +71,7 @@ class Step:
 
     If you only need the filename, read [`name`][].
 
-    Like [`name`][], it spells each filename exactly as the file system stores it.
+    Like [`name`][], it spells each filename exactly as the file system reports it.
     """
 
     root: Final[Path]

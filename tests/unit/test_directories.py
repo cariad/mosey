@@ -27,7 +27,7 @@ from tests.markers import (
 
 @needs_symlinks
 def test_list_candidates__broken_symlink(tmp_path: Path) -> None:
-    """A broken symlink is a candidate file, because Git lists it like any symlink."""
+    """A broken symlink is a candidate file, like any symlink."""
     make_broken_symlink(tmp_path / "link")
 
     assert list_candidates(os.fspath(tmp_path)) == [("link", False)]
@@ -52,13 +52,12 @@ def test_list_candidates__does_not_exist(tmp_path: Path) -> None:
             (".git", True),
             id="directory",
         ),
-        # Worktrees and submodules have a ".git" file rather than a directory.
         param(
             ".git",
             (".git", False),
             id="file",
         ),
-        # Git skips this too when `core.ignorecase` is set.
+        # A different case, so a case-insensitive skip rule would be caught too.
         param(
             ".GIT/",
             (".GIT", True),
@@ -71,7 +70,7 @@ def test_list_candidates__dot_git(
     path: str,
     expect: Candidate,
 ) -> None:
-    """`.git` is a candidate like any other name, even though Git skips it."""
+    """`.git` is a candidate like any other name."""
     make_tree(tmp_path, path)
 
     assert list_candidates(os.fspath(tmp_path)) == [expect]
@@ -84,15 +83,15 @@ def test_list_candidates__empty(tmp_path: Path) -> None:
 
 @needs_fifos
 def test_list_candidates__fifo(tmp_path: Path) -> None:
-    """A FIFO isn't a candidate, because Git skips it."""
+    """A FIFO isn't a candidate."""
     make_fifo(tmp_path / "fifo")
     make_file(tmp_path / "file")
 
     assert list_candidates(os.fspath(tmp_path)) == [("file", False)]
 
 
-def test_list_candidates__git_order(tmp_path: Path) -> None:
-    """A directory's candidates are sorted into the order that Git lists them."""
+def test_list_candidates__order(tmp_path: Path) -> None:
+    """A directory's candidates are sorted into walk order."""
     # Created in neither the expected order nor its reverse.
     make_tree(
         tmp_path,
@@ -105,10 +104,8 @@ def test_list_candidates__git_order(tmp_path: Path) -> None:
         "b-c",
     )
 
-    # Uppercase sorts before lowercase, so "Z" comes before "b".
-    #
-    # Then "-" (0x2d), "." (0x2e), "/" (0x2f), "_" (0x5f) and "a" (0x61) decide the ties
-    # on "b", with the directory "b" sorting as "b/".
+    # Uppercase before lowercase, then the byte after "b" decides the ties, with the
+    # directory "b" sorting as "b/".
     assert list_candidates(os.fspath(tmp_path)) == [
         (".a", False),
         ("Z", False),
@@ -122,7 +119,7 @@ def test_list_candidates__git_order(tmp_path: Path) -> None:
 
 @needs_junctions
 def test_list_candidates__junction(tmp_path: Path) -> None:
-    """A junction is a candidate directory, because Git walks into it."""
+    """A junction is a candidate directory."""
     make_junction(tmp_path / "link")
 
     # The junction's target, "link.target", is a real directory -- and both are

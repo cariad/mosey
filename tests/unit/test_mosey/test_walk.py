@@ -225,24 +225,57 @@ def test_root_search_is_denied(tmp_path: Path) -> None:
         root.chmod(0o700)
 
 
-def test_walk__git_order(tmp_path: Path) -> None:
-    """Files are yielded in the order that Git lists them."""
+def test_walk__order(tmp_path: Path) -> None:
+    """Files are yielded in walk order."""
     # Created in neither the expected order nor its reverse, so the test can't pass on
     # a file system that lists a directory's entries oldest first or newest first.
     make_tree(tmp_path, "b.txt", "Z", "ba", "b/x", ".a", "b_c", "b-c")
 
-    # Verified against `git ls-files --others`. Uppercase sorts before lowercase, so
-    # "Z" (0x5a) comes before "b" (0x62); a case-insensitive order would put it last.
-    # Then "-" (0x2d), "." (0x2e), "/" (0x2f), "_" (0x5f) and "a" (0x61) decide the
-    # ties on "b".
+    # Uppercase before lowercase, then the byte after "b" decides the ties, with the
+    # directory "b" sorting as "b/".
     assert relative_paths(tmp_path) == [".a", "Z", "b-c", "b.txt", "b/x", "b_c", "ba"]
+
+
+def test_walk__ascending_paths(tmp_path: Path) -> None:
+    """Files are yielded in ascending byte order of their relative paths."""
+    # The example from the walk-order page, created in neither the expected order nor
+    # its reverse.
+    make_tree(
+        tmp_path,
+        "cafz",
+        "b.txt",
+        "Z",
+        "ba/z",
+        "b/x",
+        ".a",
+        "café",
+        "b_c",
+        "b-c",
+        "a",
+    )
+
+    paths = relative_paths(tmp_path)
+
+    assert paths == [
+        ".a",
+        "Z",
+        "a",
+        "b-c",
+        "b.txt",
+        "b/x",
+        "b_c",
+        "ba/z",
+        "cafz",
+        "café",
+    ]
+
+    # The rule itself, so a typo in the hand-written list above can't slip through.
+    assert paths == sorted(paths, key=os.fsencode)
 
 
 def test_walk__depth_first(tmp_path: Path) -> None:
     """Everything inside a directory is yielded before the directory's next sibling."""
     make_tree(tmp_path, "b", "a/z", "a/b/y", "a/b/c/x")
-
-    # Verified against `git ls-files --others`.
     assert relative_paths(tmp_path) == ["a/b/c/x", "a/b/y", "a/z", "b"]
 
 
@@ -301,7 +334,6 @@ def test_walk__symlink_to_file(tmp_path: Path) -> None:
     """A symlink to a file is yielded as a file."""
     make_symlink_to_file(tmp_path / "link")
 
-    # Verified against `git ls-files --others`.
     assert relative_paths(tmp_path) == ["link", "link.target"]
 
 
@@ -311,11 +343,8 @@ def test_walk__symlink_to_directory(tmp_path: Path) -> None:
     make_symlink_to_directory(tmp_path / "link")
     make_tree(tmp_path, "link.target/x")
 
-    # Verified against `git ls-files --others`, which lists symlinks as files too.
-    #
     # If the walk had followed the symlink, it would have yielded "link/x" as well. If
-    # it had sorted the symlink as a directory, its key "link/" would have come after
-    # "link.target/", because "/" is 0x2f and "." is 0x2e.
+    # it had sorted the symlink as a directory, "link.target/x" would have come first.
     assert relative_paths(tmp_path) == ["link", "link.target/x"]
 
 
