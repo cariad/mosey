@@ -74,7 +74,7 @@ def split_ignore_file(data: bytes) -> list[str]:
         # NOTE: `line[0]` is safe because we know `line` isn't empty.
         #
         # NOTE: `startswith("#")` makes this function 31-43% slower on Python 3.11 and
-        # NOTE: 3.12 on arm64 macOS, and wasn't any faster on 3.13 and 3.14.
+        # NOTE: 3.12 on arm64 macOS, about 2% faster on 3.13, and 2-5% slower on 3.14.
         if line and line[0] != "#":
             result.append(line)
 

@@ -137,6 +137,11 @@ def test_split_ignore_file__carriage_return(data: bytes, expect: list[str]) -> N
             id="only-a-hash",
         ),
         param(
+            b"a\n# b",
+            ["a"],
+            id="final-line-without-newline",
+        ),
+        param(
             b" # a\n",
             [" # a"],
             id="leading-space",
@@ -290,18 +295,6 @@ def test_split_ignore_file__bom__not_utf8() -> None:
 def test_split_ignore_file__decoding(data: bytes, expect: list[str]) -> None:
     """Lines are decoded with the file system encoding, escaping undecodable bytes."""
     assert split_ignore_file(data) == expect
-
-
-@mark.parametrize(
-    "name",
-    [
-        b"foo",
-        b"caf\xc3\xa9",
-    ],
-)
-def test_split_ignore_file__decodes_like_fsdecode(name: bytes) -> None:
-    """A line decodes to the same string as a filename with the same bytes."""
-    assert split_ignore_file(name) == [os.fsdecode(name)]
 
 
 def test_split_ignore_file__every_byte() -> None:

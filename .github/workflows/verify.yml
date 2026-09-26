@@ -98,7 +98,7 @@ jobs:
 
   # This project contains portions of operating system-specific code (for example, code
   # to handle specific error conditions in Windows vs Linux vs macOS), so a test run on
-  # any single machine is never expected to touch every line.
+  # a single machine might not touch every line.
   #
   # So, here in CI, we run the tests in a matrix of operating systems, gather their
   # coverage, then assert that every line of code was touched by at least one of them.
