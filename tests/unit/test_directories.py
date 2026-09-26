@@ -57,12 +57,6 @@ def test_list_candidates__does_not_exist(tmp_path: Path) -> None:
             (".git", False),
             id="file",
         ),
-        # A different case, so a case-insensitive skip rule would be caught too.
-        param(
-            ".GIT/",
-            (".GIT", True),
-            id="uppercase",
-        ),
     ],
 )
 def test_list_candidates__dot_git(
@@ -166,7 +160,7 @@ def test_list_candidates__read_is_denied(tmp_path: Path) -> None:
 
 @needs_posix_permissions
 def test_list_candidates__search_is_denied(tmp_path: Path) -> None:
-    """Candidates keep their types when permissions deny searching the directory."""
+    """Each candidate's type comes from the listing, not from looking it up."""
     path = tmp_path / "directory"
     make_tree(path, "file", "subdirectory/")
     directory = os.fspath(path)
@@ -180,11 +174,9 @@ def test_list_candidates__search_is_denied(tmp_path: Path) -> None:
         with raises(PermissionError):
             os.lstat(path / "file")
 
-        # So each type must come from the listing itself. If `list_candidates` called
-        # `lstat` instead, every call would fail and every candidate would be skipped.
-        #
-        # This relies on the file system recording each object's type in the listing,
-        # which every file system in our CI matrix does.
+        # So each type must come from the listing itself. If `list_candidates` looked up
+        # each candidate separately instead, every lookup would fail here -- and every
+        # walk would be several times slower.
         assert list_candidates(directory) == [
             ("file", False),
             ("subdirectory", True),

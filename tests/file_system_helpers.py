@@ -20,7 +20,7 @@ def can_make_symlinks() -> bool:
     with TemporaryDirectory() as directory:
         try:
             Path(directory, "link").symlink_to("target")
-        except (NotImplementedError, OSError):
+        except OSError:
             return False
 
     return True
@@ -61,7 +61,6 @@ def make_fifo(path: Path) -> None:
 
     Raises:
         AssertionError: When called on Windows, which can't create FIFOs.
-        AttributeError: When any other platform can't create FIFOs.
         FileExistsError: When `path` already exists.
     """
     # `os.mkfifo` doesn't exist on Windows. This assertion convinces pyright that we
@@ -194,14 +193,8 @@ def make_tree(root: Path, *paths: str) -> None:
         *paths: Paths of the files and directories to create, relative to `root`.
 
     Raises:
-        FileExistsError: When a directory is needed where a file already exists (say,
-            "a/" or "a/b" after "a").
-        NotADirectoryError: When a directory is needed beneath a file (say, "a/b/" or
-            "a/b/c" after "a") on Linux and macOS. Windows raises `FileExistsError`
-            instead.
-        OSError: When a file is needed where a directory already exists (say, "a"
-            after "a/"). It's `IsADirectoryError` on Linux and macOS, and
-            `PermissionError` on Windows.
+        OSError: When one path needs a file where another needs a directory (say, "a"
+            and "a/b"). On Windows, this can be a misleading `PermissionError`.
         ValueError: When a path is absolute or contains "..".
     """
     for path in paths:
