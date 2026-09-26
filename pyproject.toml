@@ -36,7 +36,7 @@ dev = [
 ]
 docs = [
   "mkdocstrings-python>=2.0.8",
-  "zensical>=0.0.62",
+  "zensical>=0.0.64",
 ]
 
 [project]
