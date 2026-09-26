@@ -7,7 +7,6 @@ module.
 import errno
 import os
 import stat
-import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -19,7 +18,7 @@ from .step import Step
 class Mosey:
     """A directory walker."""
 
-    def _iterate(self, root: Path, root_str: str) -> Iterator[Step]:
+    def _iterate(self, root: Path) -> Iterator[Step]:
         """Walk a directory and yield a `Step` for every file.
 
         The walk is depth-first and yields files in the walk order documented at
@@ -28,16 +27,7 @@ class Mosey:
         The directory is expected to have been validated before calling.
 
         Args:
-            root: Path to the directory to walk, exactly as the caller passed it. Each
-                `Step` keeps this, so it might be relative, and it can't be rebuilt
-                from `root_str`.
-            root_str: Absolute path to the same directory, for listing it and the
-                directories beneath it.
-
-                This can't be worked out from `root` in here. A generator's body
-                doesn't run until the first call to `next()`, and by then the caller
-                might have changed the working directory that a relative `root`
-                resolves against. So `walk` works it out while it validates `root`.
+            root: Path to the directory to walk.
 
         Yields:
             A `Step` for every file beneath `root`.
@@ -55,6 +45,13 @@ class Mosey:
         #  - An iterator over the directory's remaining candidates. It has to be an
         #    iterator rather than the list itself, so that the `for` loop below resumes
         #    where it left off instead of starting the list again.
+        #
+        # A relative root is resolved against the working directory each time a
+        # directory is listed, so changing the working directory partway through a walk
+        # changes what gets walked. We don't guard against that: each step's path
+        # starts with the same relative root, so it would point into the new directory
+        # anyway. `os.walk` behaves the same way.
+        root_str = os.fspath(root)
         stack = [(root_str, "", iter(list_candidates(root_str)))]
 
         # NOTE: Some reviewers suggest a loop that takes one candidate at a time with
@@ -94,6 +91,9 @@ class Mosey:
         Files are yielded in a deterministic walk order, documented at
         https://cariad.github.io/mosey/walk-order/.
 
+        A relative root is found from the working directory each time a subdirectory is
+        read, so don't change the working directory during a walk.
+
         Args:
             root: Path to the directory to walk.
 
@@ -101,9 +101,9 @@ class Mosey:
             An iterator of [`Step`][mosey.Step]; one for every file.
 
                 The iterator raises [`OSError`][] when it can't list `root` or a
-                directory beneath it, say because it vanished or permissions deny
-                reading it. `root` itself isn't listed until the first step is
-                requested.
+                directory beneath it, say because it vanished, or permissions deny
+                reading it or searching the directory that holds it. `root` itself isn't
+                listed until the first step is requested.
 
         Raises:
             FileNotFoundError: When `root` is empty, doesn't exist, or can't exist (e.g.
@@ -111,14 +111,8 @@ class Mosey:
             NotADirectoryError: When `root` isn't a directory.
             OSError: When the operating system can't resolve `root` for another reason,
                 like its name being too long or a loop of symlinks.
-
-                For a loop of symlinks, [`errno`][OSError.errno] is:
-
-                - [`errno.EINVAL`][] on Windows, where [`winerror`][OSError.winerror] is
-                  1921 (`ERROR_CANT_RESOLVE_FILENAME`).
-                - [`errno.ELOOP`][] on Linux and macOS.
-            PermissionError: When file system permissions deny reaching, listing or
-                searching `root`.
+            PermissionError: When file system permissions deny reaching or listing
+                `root`.
             ValueError: When `root` contains a null character.
         """
         # `Path` normalises an empty string to ".", which would walk the current working
@@ -141,6 +135,12 @@ class Mosey:
         # string, not just *any* string representation.
         root_path = Path(root)
         root_str = os.fspath(root_path)
+
+        # A relative root is found from the working directory, so check that the working
+        # directory still exists. If it's been deleted, `os.getcwd` raises
+        # `FileNotFoundError`; without this check, the walk would quietly find nothing.
+        if not root_path.is_absolute():
+            os.getcwd()
 
         # Will raise:
         #  - `FileNotFoundError` if there's nothing there.
@@ -180,47 +180,14 @@ class Mosey:
                 root_str,
             )
 
-        # A preflight check to see if we've got permission to walk the directory. We
+        # A preflight check to see if we've got permission to list the directory. We
         # won't actually start iterating, so it'll be quick. `scandir` will raise
         # `PermissionError` if we're not allowed to look.
         with os.scandir(root_str):
             pass
 
-        # Reading a directory isn't enough to walk it. We also need permission to
-        # *search* it ("execute" on POSIX), otherwise we could list the names inside but
-        # never reach them.
-        #
-        # Nothing above checks that. `scandir` only lists names, which needs permission
-        # to read. And `os.stat(root_str)` only searched the root's *parents* on the way
-        # to the root. A directory's search permission is only checked when a path goes
-        # *through* it to a name inside, so to test the root we need to look up a name
-        # inside the root.
-        #
-        # We can't look up a real child because the root might be empty, and we can't
-        # make one because we might not be allowed to write. But every directory holds
-        # the name ".", which refers to the directory itself. So "root/." always exists,
-        # and `os.stat` will find it if we can search the root or raise
-        # `PermissionError` if we can't.
-        #
-        # We skip this on Windows for two reasons:
-        #
-        # Firstly, there's nothing to check. Windows has an equivalent permission named
-        # "Traverse Folder", but by default it grants every user the "Bypass traverse
-        # checking" privilege, so it's never enforced.
-        #
-        # Secondly, it would break extended-length paths. Windows normally tidies a path
-        # before using it -- which includes collapsing any "." and ".." parts -- and
-        # limits it to 260 characters. Starting a path with "\\?\" (for example,
-        # "\\?\C:\docs") switches that tidying off and passes the path to the file
-        # system verbatim, which is how programs reach paths longer than the limit.
-        # With the tidying off, "\\?\C:\docs\." wouldn't collapse to the "docs"
-        # directory; it'd ask for an object inside "docs" literally named ".", and
-        # `os.stat` would fail for a perfectly good root.
-        if sys.platform != "win32":
-            os.stat(os.path.join(root_str, "."))
-
         # Validation is done, so hand over to the generator.
         #
         # We intentionally don't `yield` anything in this function so that the checks
         # above run immediately rather than waiting for the first call to `next()`.
-        return self._iterate(root_path, os.fspath(root_path.absolute()))
+        return self._iterate(root_path)

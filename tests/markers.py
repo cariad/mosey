@@ -13,7 +13,7 @@ needs_fifos = mark.skipif(
 )
 """Skips a test that relies on creating FIFOs (named pipes).
 
-Windows has no `os.mkfifo`, and neither do some other builds of Python.
+Windows has no `os.mkfifo`.
 """
 
 needs_junctions = mark.skipif(
@@ -23,27 +23,14 @@ needs_junctions = mark.skipif(
 """Skips a test that relies on creating junctions, which only Windows has."""
 
 needs_posix_permissions = mark.skipif(
-    # Not every build of Python has `os.geteuid`, so we need to check for it.
-    #
-    # Two specific examples:
-    #
-    # - The WebAssembly build. That's fine; our `hasattr` check will catch that.
-    # - The Windows build. The `hasattr` check will catch that too, *but* that's not
-    #   enough to satisfy Pyright in a Windows development environment. We include the
-    #   `sys.platform == "win32"` check to shortcircuit Pyright outta there.
-    #
-    # If anyone wants to lint this package in a WebAssembly development environment...
-    # we'll cross that bridge when we come to it.
-    sys.platform == "win32" or not hasattr(os, "geteuid") or os.geteuid() == 0,
-    reason="`chmod` can't deny access on Windows, on WebAssembly, or to the root user",
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="`chmod` can't deny access on Windows or to the root user",
 )
 """Skips a test that relies on `chmod` to deny access.
 
 Such a test can't be set up:
 
-- On Windows, where `chmod` can only toggle the read-only flag
-- On Python builds for WebAssembly, which have no user IDs and so no permissions to
-  deny.
+- On Windows, where `chmod` can only toggle the read-only flag.
 - As the root user, who bypasses permission checks.
 """
 
@@ -54,14 +41,3 @@ needs_symlinks = mark.skipif(
     reason="Windows needs admin rights or Developer Mode to create symlinks",
 )
 """Skips a test that relies on creating symlinks, unless running in CI."""
-
-needs_utf8 = mark.skipif(
-    sys.getfilesystemencoding() != "utf-8",
-    reason="Assumes a UTF-8 file system encoding",
-)
-"""Skips a test whose names or expected bytes assume a UTF-8 file system encoding.
-
-Python uses UTF-8 on Windows, on macOS, and on Linux under a UTF-8 locale or in UTF-8
-mode. A Linux system with a legacy locale, and both UTF-8 mode and locale coercion
-switched off, reports something else, and can't create a name like "café".
-"""

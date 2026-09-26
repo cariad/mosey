@@ -51,10 +51,10 @@ version = "0.1.0"
 
 [tool.coverage.report]
 # This project contains portions of operating system-specific code (for example, code to
-# handle specific error conditions in Windows vs Linux vs macOS), so a test run on any
-# single machine is never expected to touch every line.
+# handle specific error conditions in Windows vs Linux vs macOS), so a test run on a
+# single machine might not touch every line.
 #
-# So, 100% coverage isn't possible locally -- but 90% feels reasonable.
+# So, 100% coverage isn't always possible locally -- but 90% feels reasonable.
 #
 # When a pull request is opened against `main`, `.github/workflows/verify.yml` runs the
 # tests in Windows, Linux, and macOS runners, then gathers the results and ensures every

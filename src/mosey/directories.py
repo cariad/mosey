@@ -13,8 +13,7 @@ from .paths import sort_key
 def list_candidates(directory: str) -> list[Candidate]:
     """Return a directory's candidates in walk order.
 
-    Only directories, files, and symlinks are candidates; anything else is excluded. Any
-    object whose type can't be determined is also excluded.
+    Only directories, files, and symlinks are candidates; anything else is excluded.
 
     The walk order is documented at https://cariad.github.io/mosey/walk-order/.
 
@@ -25,7 +24,8 @@ def list_candidates(directory: str) -> list[Candidate]:
         The directory's candidates in walk order.
 
     Raises:
-        OSError: When the directory can't be listed.
+        OSError: When the directory can't be listed, or the type of an object within it
+            can't be looked up.
     """
     candidates: list[Candidate] = []
 
@@ -37,23 +37,20 @@ def list_candidates(directory: str) -> list[Candidate]:
     with os.scandir(directory) as entries:
         # What counts as a candidate? https://cariad.github.io/mosey/walk-order/
         for entry in entries:
-            try:
-                # Files are the most common type. Check for them first, then most
-                # entries will need only one check.
-                if entry.is_file(follow_symlinks=False):
-                    is_dir = False
-                elif entry.is_dir(follow_symlinks=False):
-                    is_dir = True
-                elif entry.is_symlink():
-                    is_dir = False
-                else:
-                    continue
-            except OSError:  # pragma: no cover
-                # Every file system in our CI matrix records types, so we can't reach
-                # this for real in our current tests. Maybe one day!
-                #
-                # For now we just exclude the object. We *could* raise or collect the
-                # error instead, but we'll think about that another day.
+            # Files are the most common type. Check for them first, then most entries
+            # will need only one check.
+            #
+            # Most file systems record each object's type in the listing. On a file
+            # system that doesn't, the first check will look it up. If that fails, then
+            # we intentionally let the exception rise rather than catch and skip the
+            # entry.
+            if entry.is_file(follow_symlinks=False):
+                is_dir = False
+            elif entry.is_dir(follow_symlinks=False):
+                is_dir = True
+            elif entry.is_symlink():
+                is_dir = False
+            else:
                 continue
 
             candidates.append((entry.name, is_dir))

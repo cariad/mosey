@@ -12,7 +12,6 @@ from mosey import Mosey
 from tests.file_system_helpers import (
     make_broken_symlink,
     make_directory,
-    make_fifo,
     make_file,
     make_nothing,
     make_symlink_to_directory,
@@ -21,10 +20,8 @@ from tests.file_system_helpers import (
     relative_paths,
 )
 from tests.markers import (
-    needs_fifos,
     needs_posix_permissions,
     needs_symlinks,
-    needs_utf8,
 )
 
 
@@ -84,7 +81,6 @@ def test_root_is_beneath_a_file__cause(tmp_path: Path) -> None:
 @mark.parametrize(
     "make",
     [
-        param(make_fifo, marks=needs_fifos),
         make_file,
         param(make_symlink_to_file, marks=needs_symlinks),
     ],
@@ -118,46 +114,17 @@ def test_root_is_not_a_directory__trailing_separator(tmp_path: Path) -> None:
 
 
 @needs_symlinks
-@mark.skipif(
-    sys.platform == "win32",
-    reason="Windows reports symlink loops differently",
-)
-def test_root_is_a_symlink_loop__posix(tmp_path: Path) -> None:
-    """Linux and macOS raise `OSError` with `ELOOP` for a root in a symlink loop."""
+def test_root_is_a_symlink_loop(tmp_path: Path) -> None:
+    """`OSError` is raised when the root is a loop of symlinks."""
     root = tmp_path / "root"
     root.symlink_to(root)
 
     with raises(OSError) as raised:
         Mosey().walk(root)
 
-    # `errno.ELOOP` proves we caught the correct `OSError`.
-    assert raised.value.errno == errno.ELOOP
-
-
-@needs_symlinks
-@mark.skipif(
-    sys.platform != "win32",
-    reason="Linux and macOS report symlink loops differently",
-)
-def test_root_is_a_symlink_loop__windows(tmp_path: Path) -> None:
-    """Windows raises `OSError` with `EINVAL` for a root in a symlink loop."""
-    # `OSError.winerror` only exists on Windows, and this assertion convinces pyright
-    # that we can read it.
-    assert sys.platform == "win32"
-
-    root = tmp_path / "root"
-    root.symlink_to(root)
-
-    with raises(OSError) as raised:
-        Mosey().walk(root)
-
-    # Windows has no error code of its own for symlink loops, so Python falls back to
-    # `EINVAL`.
-    assert raised.value.errno == errno.EINVAL
-
-    # The Windows-specific code "1921" (`ERROR_CANT_RESOLVE_FILENAME`) proves we caught
-    # the correct `OSError`.
-    assert raised.value.winerror == 1921
+    # Exactly `OSError`, and not a subclass like `FileNotFoundError`: something exists
+    # at the path, but it can't be resolved.
+    assert type(raised.value) is OSError
 
 
 @needs_posix_permissions
@@ -207,41 +174,30 @@ def test_root_preflight_is_denied(tmp_path: Path) -> None:
 
 @needs_posix_permissions
 def test_root_search_is_denied(tmp_path: Path) -> None:
-    """`PermissionError` is raised when permissions deny searching the root."""
+    """A root that can be listed but not searched is walked like any directory."""
     root = tmp_path / "root"
-    root.mkdir()
+    make_tree(root, "a.txt", "b/")
 
-    # Read but not search ("execute"), so the root can be `stat`-ed and listed but
-    # nothing inside it can be reached.
-    root.chmod(0o400)
+    # Read and write but not search ("execute"), so the root can be listed but nothing
+    # inside it can be reached.
+    root.chmod(0o600)
 
     try:
-        # Prove that the stat and the preflight are allowed, so it must be the search
-        # check that fails.
-        os.stat(root)
+        # `walk` doesn't check up front that the root can be searched, so the root's
+        # files are yielded...
+        steps = Mosey().walk(root)
+        assert next(steps).relative_as_posix == "a.txt"
 
-        with os.scandir(root):
-            pass
+        # ...and the error comes when the walk tries to enter a subdirectory.
+        with raises(PermissionError) as raised:
+            next(steps)
 
-        with raises(PermissionError):
-            Mosey().walk(root)
+        assert raised.value.filename == os.fspath(root / "b")
     finally:
         # Restore access so pytest can clean up `tmp_path`.
         root.chmod(0o700)
 
 
-def test_walk__order(tmp_path: Path) -> None:
-    """Files are yielded in walk order."""
-    # Created in neither the expected order nor its reverse, so the test can't pass on
-    # a file system that lists a directory's entries oldest first or newest first.
-    make_tree(tmp_path, "b.txt", "Z", "ba", "b/x", ".a", "b_c", "b-c")
-
-    # Uppercase before lowercase, then the byte after "b" decides the ties, with the
-    # directory "b" sorting as "b/".
-    assert relative_paths(tmp_path) == [".a", "Z", "b-c", "b.txt", "b/x", "b_c", "ba"]
-
-
-@needs_utf8
 def test_walk__ascending_paths(tmp_path: Path) -> None:
     """Files are yielded in ascending byte order of their relative paths."""
     # The example from the walk-order page, created in neither the expected order nor

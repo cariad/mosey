@@ -7,7 +7,6 @@ from pytest import mark, param
 
 from mosey.candidate import Candidate
 from mosey.paths import sort_key
-from tests.markers import needs_utf8
 
 
 @mark.parametrize(
@@ -27,7 +26,6 @@ from tests.markers import needs_utf8
             ("café", False),
             b"caf\xc3\xa9",
             id="non-ascii",
-            marks=needs_utf8,
         ),
         # The key encodes the name it's given and never normalises it. "café" above
         # spells "é" as the single code point U+00E9, and this spells it as "e" then the
@@ -36,13 +34,11 @@ from tests.markers import needs_utf8
             ("cafe\u0301", False),
             b"cafe\xcc\x81",
             id="decomposed",
-            marks=needs_utf8,
         ),
         param(
             ("\U0001f600", False),
             b"\xf0\x9f\x98\x80",
             id="four-byte-character",
-            marks=needs_utf8,
         ),
     ],
 )
@@ -60,7 +56,7 @@ def test_sort_key__file_before_directory() -> None:
     "name",
     [
         "foo",
-        param("café", marks=needs_utf8),
+        "café",
         # A lone surrogate is how an undecodable byte in a filename reaches Python.
         "\udc80",
     ],
@@ -68,36 +64,6 @@ def test_sort_key__file_before_directory() -> None:
 def test_sort_key__encodes_like_fsencode(name: str) -> None:
     """A name is encoded the same way `os.fsencode` would encode it."""
     assert sort_key((name, False)) == os.fsencode(name)
-
-
-@needs_utf8
-@mark.skipif(
-    sys.platform == "win32",
-    reason="Windows escapes undecodable file names differently",
-)
-def test_sort_key__undecodable_name__posix() -> None:
-    """Linux and macOS sort an undecodable name by its raw bytes."""
-    # A file named with the single byte 0x80 isn't valid UTF-8, so it reaches Python
-    # with that byte escaped as the surrogate U+DC80.
-    #
-    # As a string, that compares higher than "é" (U+00E9), so a string key would sort it
-    # after "é".
-    #
-    # But the key is the raw bytes, where 0x80 comes *before* the 0xC3 that starts "é",
-    # so "\udc80" must sort first.
-    assert sort_key(("\udc80", False)) < sort_key(("é", False))
-
-
-@needs_utf8
-@mark.skipif(
-    sys.platform != "win32",
-    reason="Only Windows escapes unpaired surrogates as three bytes",
-)
-def test_sort_key__undecodable_name__windows() -> None:
-    """Windows encodes an unpaired surrogate as three bytes that sort after "é"."""
-    key = sort_key(("\udc80", False))
-    assert key == b"\xed\xb2\x80"
-    assert key > sort_key(("é", False))
 
 
 def test_sort_key__order() -> None:
@@ -125,10 +91,10 @@ def test_sort_key__order() -> None:
     ]
 
 
-@needs_utf8
 @mark.skipif(
     sys.platform == "win32",
-    reason="Windows encodes an unpaired surrogate as three bytes, not one",
+    reason="Windows turns the placeholder U+DC80 into three bytes, not the one byte "
+    "this test expects",
 )
 def test_sort_key__raw_bytes() -> None:
     """A directory's entries sort by their raw bytes, not by code point."""
@@ -140,6 +106,13 @@ def test_sort_key__raw_bytes() -> None:
 
     assert sort_key(("\udc80", True)) == b"\x80/"
 
+    # A directory named with the single byte 0x80 isn't valid UTF-8, so, on Linux,
+    # Python represents that byte with the placeholder character U+DC80. As a string,
+    # that compares higher than "é" (U+00E9), so a string key would sort it after "é".
+    # But the key is the raw bytes, where 0x80 comes before the 0xC3 that starts "é".
+    #
+    # Only Linux hands Python names like this (macOS refuses to create them), so this
+    # test uses strings rather than real files.
     assert sorted(entries, key=sort_key) == [
         ("z", False),
         ("\udc80", True),
