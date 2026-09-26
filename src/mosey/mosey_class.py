@@ -113,6 +113,7 @@ class Mosey:
                 like its name being too long or a loop of symlinks.
             PermissionError: When file system permissions deny reaching or listing
                 `root`.
+            ValueError: When `root` contains a null character.
         """
         # `Path` normalises an empty string to ".", which would walk the current working
         # directory. This feels a bit unexpected, so we'll protect the user and have
