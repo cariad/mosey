@@ -31,7 +31,7 @@ dev = [
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
   "ruff>=0.16.7",
-  "rumdl>=0.2.73",
+  "rumdl>=0.2.76",
   { include-group = "docs" },
 ]
 docs = [
