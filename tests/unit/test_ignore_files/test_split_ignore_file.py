@@ -1,4 +1,4 @@
-"""Unit tests for the `ignore_files` module."""
+"""Unit tests for the `split_ignore_file` function."""
 
 import os
 import subprocess

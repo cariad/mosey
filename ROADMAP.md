@@ -12,6 +12,10 @@ This is a statement of intent, not a promise! Mosey is in early development, and
 
 - Emit directories and special files (like FIFOs, sockets, devices, etc) too, if configured to. A directory's path will end in `/`, so the walk order stays ascending.
 
+### Ignore-files
+
+- Follow symlinked ignore-files. People use them to share patterns between projects, but I'm skipping them for now to avoid handling broken links. They're just not critical for v1.0.0.
+
 ### The `Step` class
 
 - Implement `__fspath__` in `Step` to make it `os.PathLike`. This'll let developers call, say, `open(step)` instead of `open(step.path)`.

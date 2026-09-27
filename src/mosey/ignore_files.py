@@ -4,12 +4,86 @@ These are internal helpers for the `mosey` package. Nothing here is explicitly e
 by the package, and signatures can change without notice.
 """
 
+import errno
+import os
+import stat
+import sys
 from typing import Final
 
 from .paths import FS_ENCODING
 
 UTF8_BOM: Final[bytes] = b"\xef\xbb\xbf"
 """UTF-8 byte order mark."""
+
+
+def read_ignore_file(path: str) -> bytes | None:
+    """Return an ignore-file's contents.
+
+    Symlinks aren't followed, so a symlink returns `None` regardless of what it points
+    to, as does a directory or anything else that isn't a regular file.
+
+    Args:
+        path: Path to the ignore-file.
+
+    Returns:
+        The ignore-file's contents, or `None` if it isn't a regular file.
+
+    Raises:
+        OSError: When the file can't be read, say because it doesn't exist or
+            permissions deny reading it.
+    """
+    # NOTE: We open and read with `os` functions rather than `open` because `open` does
+    # NOTE: work we don't need: it builds two file objects, and makes system calls of
+    # NOTE: its own, such as another `fstat`. This way is 19-23% faster on Python 3.11
+    # NOTE: to 3.14 on arm64 macOS: 9-10 microseconds rather than 12 for a 96-line file.
+    if sys.platform == "win32":
+        # Windows can't refuse to open a symlink the way Linux and macOS can (below), so
+        # we look before we open. `lstat` describes the symlink itself rather than what
+        # it points to.
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return None
+
+        # `O_BINARY` reads the bytes exactly as they are, like on Linux and macOS.
+        fd = os.open(path, os.O_RDONLY | os.O_BINARY)
+    else:
+        try:
+            # `O_NOFOLLOW` refuses to open a symlink.
+            #
+            # `O_NONBLOCK` is for FIFOs. A walk only asks us to read what its listing
+            # called a file or a symlink, but if a FIFO takes the file's place before we
+            # open it, a normal open would wait forever for something to open it for
+            # writing. With this flag, the open returns straight away and the check
+            # below turns the FIFO away.
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except OSError as error:
+            # Linux and macOS both report a refused symlink as a loop of symlinks.
+            if error.errno == errno.ELOOP:
+                return None
+            raise
+
+    try:
+        info = os.fstat(fd)
+
+        # On Linux and macOS, this is where we find out that we opened a directory or a
+        # FIFO rather than a regular file. Windows checked before opening.
+        if not stat.S_ISREG(info.st_mode):
+            return None
+
+        chunks: list[bytes] = []
+
+        while chunk := os.read(fd, info.st_size):
+            chunks.append(chunk)
+
+        return b"".join(chunks)
+
+    except OSError as error:
+        # `fstat` and `read` work on the open file rather than its path, so their errors
+        # never say which file failed.
+        error.filename = path
+        raise
+
+    finally:
+        os.close(fd)
 
 
 def split_ignore_file(data: bytes) -> list[str]:
