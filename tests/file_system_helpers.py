@@ -243,3 +243,27 @@ def symlink_target(path: Path) -> Path:
         Path to the symlink's target.
     """
     return path.with_name(f"{path.name}.target")
+
+
+def windows_can_create(path: str) -> bool:
+    r"""Check if Windows can create every name in a path, exactly as written.
+
+    Windows refuses a name holding a control character or any of `\ : * ? " < > |`, and
+    drops a space or dot from the end of one, so `make_tree(root, "a ")` makes "a"
+    instead. These rules come from Microsoft's documentation on naming files.
+
+    Args:
+        path: Path relative to a root, using "/" as its separator, as `make_tree` takes
+            it.
+
+    Returns:
+        `True` if Windows can create every name in `path` exactly, otherwise `False`.
+    """
+    for name in path.split("/"):
+        if name.endswith((" ", ".")):
+            return False
+
+        if any(ord(character) < 32 or character in '\\:*?"<>|' for character in name):
+            return False
+
+    return True
