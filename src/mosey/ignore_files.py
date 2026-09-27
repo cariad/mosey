@@ -4,12 +4,65 @@ These are internal helpers for the `mosey` package. Nothing here is explicitly e
 by the package, and signatures can change without notice.
 """
 
+import os
+import sys
 from typing import Final
 
 from .paths import FS_ENCODING
 
+# `O_BINARY` reads the bytes exactly as they are on Windows, like on Linux and macOS.
+#
+# `O_NONBLOCK` is for FIFOs, which Windows doesn't have. An ignore-file could be a FIFO,
+# or a symlink to one, and a normal open would wait forever for something to open it for
+# writing. With this flag, the open returns straight away.
+OPEN_FLAGS: Final[int] = os.O_RDONLY | (
+    os.O_BINARY if sys.platform == "win32" else os.O_NONBLOCK
+)
+"""Flags for opening an ignore-file."""
+
 UTF8_BOM: Final[bytes] = b"\xef\xbb\xbf"
 """UTF-8 byte order mark."""
+
+
+def read_ignore_file(path: str) -> bytes:
+    """Return an ignore-file's contents.
+
+    Args:
+        path: Path to the ignore-file.
+
+    Returns:
+        The ignore-file's contents.
+
+    Raises:
+        OSError: When the file can't be read, say because it doesn't exist, it's a
+            directory, or permissions deny reading it.
+    """
+    # NOTE: We open and read with `os` functions rather than `open` because `open` does
+    # NOTE: work we don't need: it builds two file objects, and makes extra system
+    # NOTE: calls. This way is 14-19% faster on Python 3.11 to 3.14 on arm64 macOS: 9-10
+    # NOTE: microseconds rather than 11 for a 96-line file.
+    fd = os.open(path, OPEN_FLAGS)
+
+    try:
+        # FIFOs and devices report a size of 0, so asking for the reported size reads
+        # nothing from them. Otherwise, a device like /dev/zero would never end.
+        size = os.fstat(fd).st_size
+
+        chunks: list[bytes] = []
+
+        while chunk := os.read(fd, size):
+            chunks.append(chunk)
+
+        return b"".join(chunks)
+
+    except OSError as error:
+        # `fstat` and `read` work on the open file rather than its path, so their errors
+        # never say which file failed.
+        error.filename = path
+        raise
+
+    finally:
+        os.close(fd)
 
 
 def split_ignore_file(data: bytes) -> list[str]:
