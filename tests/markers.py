@@ -6,6 +6,7 @@ import sys
 from pytest import mark
 
 from tests.file_system_helpers import can_make_symlinks
+from tests.git_oracle import MINIMUM_VERSION, has_git
 
 needs_fifos = mark.skipif(
     not hasattr(os, "mkfifo"),
@@ -15,6 +16,14 @@ needs_fifos = mark.skipif(
 
 Windows has no `os.mkfifo`.
 """
+
+needs_git = mark.skipif(
+    # GitHub Actions' runners all have Git, so let's fail rather than skip if that
+    # changes.
+    not has_git() and not os.environ.get("CI"),
+    reason=f"Git {MINIMUM_VERSION[0]}.{MINIMUM_VERSION[1]} or later isn't installed",
+)
+"""Skips a test that compares with Git, unless running in CI."""
 
 needs_junctions = mark.skipif(
     sys.platform != "win32",
