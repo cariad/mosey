@@ -5,6 +5,7 @@ import os
 import signal
 import sys
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from types import FrameType
 
@@ -16,8 +17,10 @@ from tests.file_system_helpers import (
     make_directory,
     make_fifo,
     make_file,
+    make_nothing,
     make_symlink_to_directory,
     make_symlink_to_file,
+    symlink_target,
 )
 from tests.markers import needs_fifos, needs_posix_permissions, needs_symlinks
 
@@ -58,7 +61,7 @@ def test_read_ignore_file(tmp_path: Path, data: bytes) -> None:
     ],
 )
 def test_read_ignore_file__closes(tmp_path: Path, make: Callable[[Path], None]) -> None:
-    """The file is closed afterwards, whatever is returned."""
+    """The file is closed afterwards, even when reading it fails."""
     path = tmp_path / "ignore"
     make(path)
 
@@ -70,7 +73,10 @@ def test_read_ignore_file__closes(tmp_path: Path, make: Callable[[Path], None]) 
     before = os.open(probe, os.O_RDONLY)
     os.close(before)
 
-    read_ignore_file(os.fspath(path))
+    # Linux and macOS open a directory, then fail to read it, so that row checks that
+    # the file is closed after a failed read too.
+    with suppress(OSError):
+        read_ignore_file(os.fspath(path))
 
     after = os.open(probe, os.O_RDONLY)
     os.close(after)
@@ -78,9 +84,58 @@ def test_read_ignore_file__closes(tmp_path: Path, make: Callable[[Path], None]) 
     assert after == before
 
 
-def test_read_ignore_file__does_not_exist(tmp_path: Path) -> None:
-    """`FileNotFoundError` is raised when the file doesn't exist."""
-    path = os.fspath(tmp_path / "nope")
+@mark.parametrize(
+    "make",
+    [
+        param(
+            make_directory,
+            id="directory",
+        ),
+        param(
+            make_symlink_to_directory,
+            marks=needs_symlinks,
+            id="symlink-to-directory",
+        ),
+    ],
+)
+def test_read_ignore_file__directory(
+    tmp_path: Path,
+    make: Callable[[Path], None],
+) -> None:
+    """An error is raised for a directory, or a symlink to one."""
+    file = tmp_path / "ignore"
+    make(file)
+    path = os.fspath(file)
+
+    # Linux and macOS open a directory but can't read it. Windows can't open it at all.
+    with raises(OSError) as raised:
+        read_ignore_file(path)
+
+    assert raised.value.filename == path
+
+
+@mark.parametrize(
+    "make",
+    [
+        param(
+            make_nothing,
+            id="missing",
+        ),
+        param(
+            make_broken_symlink,
+            marks=needs_symlinks,
+            id="broken-symlink",
+        ),
+    ],
+)
+def test_read_ignore_file__does_not_exist(
+    tmp_path: Path,
+    make: Callable[[Path], None],
+) -> None:
+    """`FileNotFoundError` is raised for a missing file, or a broken symlink."""
+    file = tmp_path / "ignore"
+    make(file)
+    path = os.fspath(file)
 
     with raises(FileNotFoundError) as raised:
         read_ignore_file(path)
@@ -91,7 +146,7 @@ def test_read_ignore_file__does_not_exist(tmp_path: Path) -> None:
 
 @needs_fifos
 def test_read_ignore_file__fifo(tmp_path: Path) -> None:
-    """`None` is returned for a FIFO, without waiting for a writer to open it."""
+    """A FIFO reads as empty, without waiting for a writer to open it."""
     path = tmp_path / "ignore"
     make_fifo(path)
 
@@ -109,7 +164,7 @@ def test_read_ignore_file__fifo(tmp_path: Path) -> None:
     signal.setitimer(signal.ITIMER_REAL, 1)
 
     try:
-        assert read_ignore_file(os.fspath(path)) is None
+        assert read_ignore_file(os.fspath(path)) == b""
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
@@ -149,41 +204,6 @@ def test_read_ignore_file__locked(tmp_path: Path) -> None:
     assert raised.value.filename == path
 
 
-@mark.parametrize(
-    "make",
-    [
-        param(
-            make_directory,
-            id="directory",
-        ),
-        param(
-            make_broken_symlink,
-            marks=needs_symlinks,
-            id="broken-symlink",
-        ),
-        param(
-            make_symlink_to_directory,
-            marks=needs_symlinks,
-            id="symlink-to-directory",
-        ),
-        param(
-            make_symlink_to_file,
-            marks=needs_symlinks,
-            id="symlink-to-file",
-        ),
-    ],
-)
-def test_read_ignore_file__not_a_regular_file(
-    tmp_path: Path,
-    make: Callable[[Path], None],
-) -> None:
-    """`None` is returned for anything but a regular file, including any symlink."""
-    path = tmp_path / "ignore"
-    make(path)
-
-    assert read_ignore_file(os.fspath(path)) is None
-
-
 @needs_posix_permissions
 def test_read_ignore_file__read_is_denied(tmp_path: Path) -> None:
     """`PermissionError` is raised when permissions deny reading the file."""
@@ -203,3 +223,13 @@ def test_read_ignore_file__read_is_denied(tmp_path: Path) -> None:
     finally:
         # Leave the file readable, as we found it.
         file.chmod(0o600)
+
+
+@needs_symlinks
+def test_read_ignore_file__symlink(tmp_path: Path) -> None:
+    """A symlink is followed, and its target's contents are returned."""
+    path = tmp_path / "ignore"
+    make_symlink_to_file(path)
+    symlink_target(path).write_bytes(b"a\n")
+
+    assert read_ignore_file(os.fspath(path)) == b"a\n"
