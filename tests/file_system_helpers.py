@@ -5,7 +5,11 @@ import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from pytest import skip
+
 from mosey import Mosey
+from mosey.patterns import Pattern
+from tests.git_oracle import git_list_files
 
 
 def can_make_symlinks() -> bool:
@@ -24,6 +28,53 @@ def can_make_symlinks() -> bool:
             return False
 
     return True
+
+
+def format_pattern(pattern: Pattern) -> str:
+    """Return an ignore-file line that means the same as a pattern.
+
+    Every space in the glob is escaped, so none can be trimmed from the end of the line.
+    A pattern that wrongly kept a trailing space then matches differently, rather than
+    being trimmed back into the right one.
+
+    Args:
+        pattern: The pattern to write as a line.
+
+    Returns:
+        The line.
+    """
+    glob, negated, directory_only, anchored = pattern
+    characters = iter(glob)
+    escaped = ""
+
+    for character in characters:
+        if character == "\\":
+            # Keep an escape as it is, along with the character it escapes.
+            escaped += character + next(characters, "")
+        elif character == " ":
+            escaped += "\\ "
+        else:
+            escaped += character
+
+    prefix = ("!" if negated else "") + ("/" if anchored else "")
+    return prefix + escaped + ("/" if directory_only else "")
+
+
+def list_files(root: Path, tree: list[str], lines: list[str]) -> list[str]:
+    """Create a tree with an ignore-file, and return the files Git lists beneath it.
+
+    Args:
+        root: Path to the directory to create the tree in.
+        tree: Files and directories to create, as `make_tree` takes them.
+        lines: Lines to write to the ignore-file, named "ignore", in the root.
+
+    Returns:
+        The files Git lists, in order.
+    """
+    root.mkdir()
+    make_tree(root, *tree)
+    (root / "ignore").write_bytes("".join(f"{line}\n" for line in lines).encode())
+    return git_list_files(root, "ignore")
 
 
 def make_broken_symlink(path: Path) -> None:
@@ -228,6 +279,24 @@ def relative_paths(root: Path) -> list[str]:
         The relative path of every step.
     """
     return [step.relative_as_posix for step in Mosey().walk(root)]
+
+
+def skip_if_windows_cannot_create(paths: list[str]) -> None:
+    """Skip the test on Windows if Windows can't create any of the paths exactly.
+
+    Windows refuses some names, and changes others ("a " becomes "a"), so a test that
+    needs one is only run on Linux and macOS.
+
+    Args:
+        paths: Paths relative to a root, using "/" as their separator, as `make_tree`
+            takes them.
+    """
+    if sys.platform != "win32":
+        return
+
+    for path in paths:
+        if not windows_can_create(path):
+            skip(f"Windows can't create {path!r}")
 
 
 def symlink_target(path: Path) -> Path:

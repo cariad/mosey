@@ -1,14 +1,16 @@
 """Unit tests for the `patterns` module."""
 
-import sys
 from pathlib import Path
 from typing import NamedTuple
 
-from pytest import mark, param, skip
+from pytest import mark, param
 
 from mosey.patterns import Pattern, parse_pattern
-from tests.file_system_helpers import make_tree, windows_can_create
-from tests.git_oracle import git_list_files
+from tests.file_system_helpers import (
+    format_pattern,
+    list_files,
+    skip_if_windows_cannot_create,
+)
 from tests.markers import needs_git
 
 
@@ -29,53 +31,6 @@ class PatternCase(NamedTuple):
 
     before: str | None = None
     """A line to put before `line`, so that a negation has something to re-include."""
-
-
-def format_pattern(pattern: Pattern) -> str:
-    """Return an ignore-file line that means the same as a pattern.
-
-    Every space in the glob is escaped, so none can be trimmed from the end of the line.
-    A pattern that wrongly kept a trailing space then matches differently, rather than
-    being trimmed back into the right one.
-
-    Args:
-        pattern: The pattern to write as a line.
-
-    Returns:
-        The line.
-    """
-    glob, negated, directory_only, anchored = pattern
-    characters = iter(glob)
-    escaped = ""
-
-    for character in characters:
-        if character == "\\":
-            # Keep an escape as it is, along with the character it escapes.
-            escaped += character + next(characters, "")
-        elif character == " ":
-            escaped += "\\ "
-        else:
-            escaped += character
-
-    prefix = ("!" if negated else "") + ("/" if anchored else "")
-    return prefix + escaped + ("/" if directory_only else "")
-
-
-def list_files(root: Path, tree: list[str], lines: list[str]) -> list[str]:
-    """Create a tree with an ignore-file, and return the files Git lists beneath it.
-
-    Args:
-        root: Path to the directory to create the tree in.
-        tree: Files and directories to create, as `make_tree` takes them.
-        lines: Lines to write to the ignore-file, named "ignore", in the root.
-
-    Returns:
-        The files Git lists, in order.
-    """
-    root.mkdir()
-    make_tree(root, *tree)
-    (root / "ignore").write_bytes("".join(f"{line}\n" for line in lines).encode())
-    return git_list_files(root, "ignore")
 
 
 TRAILING_SPACES = [
@@ -588,12 +543,7 @@ def test_parse_pattern__never_matches(case: PatternCase) -> None:
 )
 def test_parse_pattern__git(tmp_path: Path, case: PatternCase) -> None:
     """Git lists the expected files, for the line and for its expected pattern."""
-    # Windows refuses some names, and quietly changes others ("a " becomes "a"), so a
-    # row that needs one is only checked on Linux and macOS.
-    if sys.platform == "win32":
-        for path in case.tree:
-            if not windows_can_create(path):
-                skip(f"Windows can't create {path!r}")
+    skip_if_windows_cannot_create(case.tree)
 
     before = [] if case.before is None else [case.before]
     lines = [*before, case.line]
