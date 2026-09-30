@@ -21,7 +21,7 @@ requires = ["hatchling"]
 # `actionlint-py` is a special case because it downloads a binary. We don't need to go
 # this far for anything else.
 actions = [
-  "actionlint-py>=1.7.12.24",
+  "actionlint-py>=1.7.12.25",
   # We never call `shellcheck` directly; `actionlint` uses it if it's installed, and
   # skips tests if not. So, we install it!
   "shellcheck-py>=0.11.0.1",
