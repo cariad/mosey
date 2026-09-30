@@ -35,7 +35,7 @@ dev = [
   { include-group = "docs" },
 ]
 docs = [
-  "mkdocstrings-python>=2.0.8",
+  "mkdocstrings-python>=2.0.9",
   "zensical>=0.0.62",
 ]
 
