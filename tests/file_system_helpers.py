@@ -336,3 +336,20 @@ def windows_can_create(path: str) -> bool:
             return False
 
     return True
+
+
+def write_ignore_files(root: Path, files: dict[str, list[str]]) -> None:
+    """Write an ignore-file, named "ignore", into each of several directories.
+
+    Missing directories are created, `root` included.
+
+    Args:
+        root: Path to the tree's root.
+        files: Lines to write, by directory. Each directory is relative to `root` and
+            uses "/" as its separator on every operating system, or is "" for `root`
+            itself.
+    """
+    for directory, lines in files.items():
+        path = root / directory
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "ignore").write_bytes("".join(f"{line}\n" for line in lines).encode())
