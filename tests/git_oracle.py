@@ -190,11 +190,14 @@ def git_workspace() -> Path:
     return path
 
 
-def has_git() -> bool:
-    """Check if Git 2.32 or later is installed.
+def has_git(minimum: tuple[int, int] = MINIMUM_VERSION) -> bool:
+    """Check if Git is installed.
+
+    Args:
+        minimum: The oldest version to accept, as the major and minor values.
 
     Returns:
-        `True` if Git 2.32 or later is installed, otherwise `False`.
+        `True` if Git `minimum` or later is installed, otherwise `False`.
     """
     version = git_version()
 
@@ -204,7 +207,7 @@ def has_git() -> bool:
     # Git for Windows and Apple add to the version (say, "git version 2.54.0.windows.1"
     # or "git version 2.54.0 (Apple Git-157)"), so we only read the first two numbers.
     match = re.match(r"git version (\d+)\.(\d+)", version)
-    return match is not None and (int(match[1]), int(match[2])) >= MINIMUM_VERSION
+    return match is not None and (int(match[1]), int(match[2])) >= minimum
 
 
 def run_git(*arguments: str, cwd: Path | None = None) -> bytes:

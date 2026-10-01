@@ -139,14 +139,17 @@ def translate_glob(glob: str) -> str | None:
     only itself:
 
     ```text
-    Glob            Matches        Doesn't match
-    "a*"            "a", "abc"     "ba", "a/b"
-    "a?c"           "abc"          "ac", "a/c"
-    "a\*"           "a*"           "ab"
-    "a[bc]"         "ab", "ac"     "ad", "abc"
-    "a[!b]c"        "adc"          "abc", "a/c"
-    "a[b-d]"        "ac"           "ae"
-    "a[[:digit:]]"  "a1"           "ab"
+    Glob            Matches         Doesn't match
+    "a*"            "a", "abc"      "ba", "a/b"
+    "a?c"           "abc"           "ac", "a/c"
+    "a\*"           "a*"            "ab"
+    "a[bc]"         "ab", "ac"      "ad", "abc"
+    "a[!b]c"        "adc"           "abc", "a/c"
+    "a[b-d]"        "ac"            "ae"
+    "a[[:digit:]]"  "a1"            "ab"
+    "**/a"          "a", "b/c/a"    "ba"
+    "a/**/b"        "a/b", "a/c/b"  "ab"
+    "a/**"          "a/b", "a/b/c"  "a"
     ```
 
     In a bracket expression, a "!" or "^" straight after the "[" negates the set, and a
@@ -157,6 +160,13 @@ def translate_glob(glob: str) -> str | None:
     "[:alpha:]", "[:blank:]", "[:cntrl:]", "[:digit:]", "[:graph:]", "[:lower:]",
     "[:print:]", "[:punct:]", "[:space:]", "[:upper:]" and "[:xdigit:]", and they hold
     ASCII characters only.
+
+    A "**" can match "/" when it makes up a whole path segment, with only the start of
+    the glob or a "/" before it, and only a "/" or the end of the glob after it. Then
+    "**/" matches any number of directories, even none, and a "**" at the end matches
+    everything inside the directory before it, or everything at all when it's the whole
+    glob. A "/" next to it counts whether it's escaped or not, and "***" is the same as
+    "**". Any other run of "*" matches the same as one "*".
 
     A "?" or a bracket expression matches one character, even one that takes several
     bytes, so "caf?" and "caf[!x]" match "café".
@@ -171,51 +181,14 @@ def translate_glob(glob: str) -> str | None:
     """
     # NOTE: Jumping from one special part to the next with `search`, rather than
     # NOTE: stepping through the glob one character at a time, makes translating a 96-
-    # NOTE: line file's globs over twice as fast: 39-53 microseconds rather than 91-127
+    # NOTE: line file's globs about twice as fast: 34-47 microseconds rather than 73-106
     # NOTE: on Python 3.11 to 3.14 on arm64 macOS.
     #
-    # NOTE: Globs full of wildcards take about as long either way. Splitting the glob
-    # NOTE: first would be 3-10% faster on those, but `SPECIAL` would then have to find
-    # NOTE: whole bracket expressions, and one broken line of 2,000 characters could
-    # NOTE: take over a second.
-
-    # The regular expression for the text before the first "*", then for the text after
-    # each "*".
-    chunks = [""]
-
-    # Where the plain text before the next special part starts.
-    position = 0
-
-    while match := SPECIAL.search(glob, position):
-        chunks[-1] += re.escape(glob[position : match.start()])
-        position = match.end()
-        special = match[0]
-
-        if special == "?":
-            chunks[-1] += "[^/]"
-        elif special[0] == "*":
-            # A run of "*" matches the same as one.
-            chunks.append("")
-        elif special == "[":
-            bracket = translate_bracket(glob, position)
-
-            if bracket is None:
-                return None
-
-            translation, position = bracket
-            chunks[-1] += translation
-        elif special == "\\":
-            # A backslash at the very end has nothing to escape, so the glob is broken
-            # and matches nothing.
-            return None
-        else:
-            # A backslash makes the character after it literal.
-            chunks[-1] += re.escape(special[1])
-
-    chunks[-1] += re.escape(glob[position:])
-
-    if len(chunks) == 1:
-        return chunks[0]
+    # NOTE: Stepping would be 6% slower to 19% faster on globs full of wildcards, and
+    # NOTE: 5-23% faster on globs full of brackets. Splitting the glob first would be
+    # NOTE: 2-13% faster on globs full of wildcards, but `SPECIAL` would then have to
+    # NOTE: find whole bracket expressions, and one broken line of 2,000 characters
+    # NOTE: could take over a second.
 
     # With several "*", trying every way to share a long name between them can take
     # seconds. So the text between two "*" is matched at the earliest place it fits, and
@@ -224,5 +197,103 @@ def translate_glob(glob: str) -> str | None:
     #
     # The text before the first "*" has to start the name, and the text after the last
     # one has to end it, so both are matched plainly.
-    head, *middle, tail = chunks
-    return head + "".join(f"(?>[^/]*?{chunk})" for chunk in middle) + "[^/]*" + tail
+    #
+    # A "**" is the same, one level up. The part of the glob between two "**" ends with
+    # a "/", and only a "/" written in it can match one, so wherever it starts, it
+    # covers a fixed number of whole directories. So it's matched at the earliest
+    # directory where it fits, and never moved later, which leaves the most of the path
+    # for what comes after. The parts before the first "**" and after the last one are
+    # matched plainly.
+
+    # NOTE: `chunk`, `part` and `finished` are local variables that grow with `+=`,
+    # NOTE: which can add to a string without copying it. On Python 3.11 to 3.14 on
+    # NOTE: arm64 macOS, translating 64,000 "?" takes about 15 milliseconds rather than
+    # NOTE: 150 when each chunk is an item in a list, and 22,000 "*a" take about 8
+    # NOTE: milliseconds rather than 55 when `part` is rebuilt with an f-string.
+
+    # The regular expression for the text since the last "*".
+    chunk = ""
+
+    # The regular expression for the text since the last "**", up to its last "*", or
+    # `None` if there's no "*" since the last "**".
+    part: str | None = None
+
+    # The regular expression for the glob up to its last "**", or `None` if there's no
+    # "**" that makes up a whole path segment.
+    finished: str | None = None
+
+    # Where the plain text before the next special part starts.
+    position = 0
+
+    while match := SPECIAL.search(glob, position):
+        start = match.start()
+        chunk += re.escape(glob[position:start])
+        position = match.end()
+        special = match[0]
+
+        if special == "?":
+            chunk += "[^/]"
+        elif special[0] == "*":
+            whole = len(special) > 1 and (start == 0 or glob[start - 1] == "/")
+
+            if whole and (
+                position == len(glob) or glob.startswith(("/", "\\/"), position)
+            ):
+                # The part before the "**" is finished.
+                if part is not None:
+                    chunk = f"{part}[^/]*{chunk}"
+
+                if finished is None:
+                    finished = chunk
+                else:
+                    finished += f"(?>(?:[^/]*/)*?{chunk})"
+
+                chunk = ""
+
+                if position == len(glob):
+                    # A "**" at the end matches everything inside, even a line break.
+                    return f"{finished}(?s:.*)"
+                else:
+                    # An escaped "/" after the "**" counts the same as a plain one.
+                    part = None
+                    position = glob.index("/", position) + 1
+            else:
+                # Any other run of "*" matches the same as one.
+                if part is None:
+                    part = chunk
+                else:
+                    part += f"(?>[^/]*?{chunk})"
+
+                chunk = ""
+        elif special == "[":
+            bracket = translate_bracket(glob, position)
+
+            if bracket is None:
+                return None
+
+            translation, position = bracket
+            chunk += translation
+        elif special == "\\":
+            # A backslash at the very end has nothing to escape, so the glob is broken
+            # and matches nothing.
+            return None
+        else:
+            # A backslash makes the character after it literal.
+            chunk += re.escape(special[1])
+
+    chunk += re.escape(glob[position:])
+
+    if part is not None:
+        chunk = f"{part}[^/]*{chunk}"
+
+    if finished is None:
+        return chunk
+
+    # NOTE: Writing the last "**" with ".*", rather than as "(?:[^/]*/)*" like the
+    # NOTE: others, makes matching a glob like "**/a" 24-28% faster, and one like
+    # NOTE: "a/**/b" 2-6% faster, on Python 3.11 to 3.14 on arm64 macOS.
+
+    # Each "**" but the last stays at the first directory where the part after it fits,
+    # so a glob can't stall. The "(?s:...)" lets "." match a line break too, which a
+    # name can hold.
+    return f"{finished}(?s:.*/)?{chunk}"
