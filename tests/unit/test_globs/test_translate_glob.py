@@ -15,6 +15,7 @@ from tests.file_system_helpers import (
     list_files,
     skip_if_windows_cannot_create,
 )
+from tests.git_oracle import has_git
 from tests.markers import needs_git
 
 
@@ -30,12 +31,27 @@ class GlobCase(NamedTuple):
     misses: list[str]
     """Names or paths that the glob doesn't match, in the order Git lists them."""
 
+    after: str | None = None
+    """A line for Git to read after the glob's, if any.
+
+    It re-includes a directory that the glob matches, so that Git judges the files
+    inside it by the glob too, rather than leaving them out with the directory.
+    """
+
     divergence: str | None = None
     """Why Git matches differently, if it does."""
 
 
 ONE_BYTE = 'Git\'s "?" and "[...]" match one byte, and Mosey\'s match one character'
 """Why Git matches some non-ASCII names differently."""
+
+ESCAPED_SLASH = 'Git\'s "**" before an escaped "/" stands for at least one directory'
+"""Why Git matches a "**" before an escaped "/" differently."""
+
+BEFORE_GIT_2_52 = (
+    None if has_git((2, 52)) else 'Git before 2.52 matches "foo**/bar" against "foobar"'
+)
+"""Why Git before 2.52 matches some runs of "*" differently, or `None` from 2.52 on."""
 
 
 def matching(case: GlobCase) -> list[str]:
@@ -248,6 +264,188 @@ ASTERISKS = [
 @mark.parametrize("case", ASTERISKS)
 def test_translate_glob__asterisks(case: GlobCase) -> None:
     """A "*" matches any run of characters other than "/", even none."""
+    assert matching(case) == case.matches
+
+
+DOUBLE_ASTERISKS = [
+    param(
+        GlobCase(
+            glob="**/a", matches=["a", "x/a", "x/y/a"], misses=["b", "x/ya", "xa"]
+        ),
+        id="double-star-at-start",
+    ),
+    param(
+        GlobCase(
+            glob="a/**/b",
+            matches=["a/b", "a/x/b", "a/x/y/b"],
+            misses=["a/c", "a/xb", "ab", "x/a/b"],
+        ),
+        id="double-star-in-middle",
+    ),
+    # Git leaves out everything inside a directory that the glob matches, so it can only
+    # tell "a/**" from "a/*" when a second line re-includes a directory inside.
+    param(
+        GlobCase(
+            glob="a/**",
+            matches=["a/b", "a/c/d"],
+            misses=["ab", "b"],
+            after="!/a/c/",
+        ),
+        id="double-star-at-end",
+    ),
+    # "a/**" matches what's inside "a", but not "a" itself.
+    param(
+        GlobCase(glob="a/**", matches=[], misses=["a", "ab"]),
+        id="double-star-at-end-not-the-directory",
+    ),
+    param(
+        GlobCase(glob="**", matches=["a", "b/c", "d/e/f"], misses=[], after="!/b/"),
+        id="double-star-alone",
+    ),
+    param(
+        GlobCase(glob="***/a", matches=["a", "x/a", "x/y/a"], misses=["b", "xa"]),
+        id="triple-star",
+    ),
+    param(
+        GlobCase(glob="**/**/a", matches=["a", "x/a", "x/y/a"], misses=["b"]),
+        id="double-stars-together",
+    ),
+    param(
+        GlobCase(glob="**/.a", matches=[".a", ".x/.a", ".x/.y/.a"], misses=[".x/b"]),
+        id="double-star-and-dots",
+    ),
+    # A directory's name can hold a line break.
+    param(
+        GlobCase(glob="**/a", matches=["x\ny/a"], misses=["x\ny/b"]),
+        id="double-star-and-line-break",
+    ),
+    param(
+        GlobCase(
+            glob="a/**/*/**/b",
+            matches=["a/x/b", "a/x/y/b"],
+            misses=["a/b", "a/c"],
+        ),
+        id="star-between-double-stars",
+    ),
+    param(
+        GlobCase(
+            glob="**/a/**/b",
+            matches=["a/a/b", "a/b", "a/x/a/y/b", "x/a/y/b"],
+            misses=["b/a", "x/b"],
+        ),
+        id="double-stars-chained",
+    ),
+    # "a/ab/c" only matches when the first "**" stands for "a/", even though the
+    # directory "a" could start "a*b" too.
+    param(
+        GlobCase(
+            glob="**/a*b/**/c",
+            matches=["a/ab/c", "ab/c", "x/axb/y/c"],
+            misses=["a/b/c", "c"],
+        ),
+        id="double-stars-around-star",
+    ),
+    # The part between the two "**" has to fit at the first "a/" it can, or "a/a/b"
+    # can't match.
+    param(
+        GlobCase(
+            glob="**/a/**/a/b",
+            matches=["a/a/b", "a/x/a/b", "x/a/a/b"],
+            misses=["a/b", "x/a/b"],
+        ),
+        id="double-stars-fitting-early",
+    ),
+    # A run of "*" that isn't a whole path segment matches the same as one "*".
+    param(
+        GlobCase(glob="**a", matches=["a", "xa"], misses=["x/a", "xb"]),
+        id="double-star-before-text",
+    ),
+    param(
+        GlobCase(glob="a/**b", matches=["a/b", "a/xb"], misses=["a/x/b", "a/x/yb"]),
+        id="double-star-after-slash",
+    ),
+    # "a**" matches the directory "ax", so Git only judges "ax/y" by the glob once a
+    # second line re-includes "ax".
+    param(
+        GlobCase(glob="a**", matches=["a", "ab"], misses=["ax/y"], after="!/ax/"),
+        id="double-star-at-end-after-letter",
+    ),
+    param(
+        GlobCase(
+            glob="foo**/bar",
+            matches=["foo/bar", "foox/bar"],
+            misses=["foo/x/bar", "foobar", "fooxbar"],
+            divergence=BEFORE_GIT_2_52,
+        ),
+        id="double-star-after-text",
+    ),
+    param(
+        GlobCase(
+            glob="a**/b",
+            matches=["a/b", "ax/b"],
+            misses=["a/x/b", "ab", "ax/y/b"],
+            divergence=BEFORE_GIT_2_52,
+        ),
+        id="double-star-after-letter",
+    ),
+    param(
+        GlobCase(
+            glob="?**/a",
+            matches=["x/a", "xy/a"],
+            misses=["x/y/a", "xa"],
+            divergence=BEFORE_GIT_2_52,
+        ),
+        id="double-star-after-question-mark",
+    ),
+    param(
+        GlobCase(glob="**[a]", matches=["a", "ba"], misses=["b/a", "bb"]),
+        id="double-star-before-bracket",
+    ),
+    # A bracket expression never counts as a "/", even one that holds a "/".
+    param(
+        GlobCase(glob="a/**[/]b", matches=[], misses=["a/b", "a/x/b", "a/xb"]),
+        id="double-star-before-slash-in-brackets",
+    ),
+    # A "*" in a bracket expression, or escaped, is just a "*".
+    param(
+        GlobCase(glob="a/[*][*]/b", matches=["a/**/b"], misses=["a/b", "a/x/b"]),
+        id="stars-in-brackets",
+    ),
+    param(
+        GlobCase(glob="\\*\\*", matches=["**"], misses=["ab"]),
+        id="escaped-stars",
+    ),
+    # Only an escaped "/" counts as a "/" after a "**", not any other escaped character.
+    param(
+        GlobCase(
+            glob="a/**\\b/c", matches=["a/b/c", "a/xb/c"], misses=["a/x/b/c", "a/x/c"]
+        ),
+        id="double-star-before-escaped-letter",
+    ),
+    # An escaped "/" next to a "**" counts the same as a plain one.
+    param(
+        GlobCase(
+            glob="a\\/**/b",
+            matches=["a/b", "a/x/b", "a/x/y/b"],
+            misses=["a/c"],
+        ),
+        id="double-star-after-escaped-slash",
+    ),
+    param(
+        GlobCase(
+            glob="**\\/a",
+            matches=["a", "x/a", "x/y/a"],
+            misses=["b"],
+            divergence=ESCAPED_SLASH,
+        ),
+        id="double-star-before-escaped-slash",
+    ),
+]
+
+
+@mark.parametrize("case", DOUBLE_ASTERISKS)
+def test_translate_glob__double_asterisks(case: GlobCase) -> None:
+    """A "**" can match "/" only when it makes up a whole path segment."""
     assert matching(case) == case.matches
 
 
@@ -731,9 +929,10 @@ def test_translate_glob__malformed(case: GlobCase) -> None:
     assert translate_glob(case.glob) is None
 
 
-# If each "*" were translated plainly, each of these would take 3-6 seconds to fail on
-# Python 3.11 to 3.14 on arm64 macOS, because the regular expression engine would try
-# every way to share the name between the "*".
+# If each "*" and "**" were translated plainly, each of these would take 3-6 seconds
+# to fail on Python 3.11 to 3.14 on arm64 macOS, because the regular expression engine
+# would try every way to share the name between the "*", or the directories between the
+# "**".
 TIMING = [
     param(
         GlobCase(glob="*a" * 7 + "*b", matches=[], misses=["a" * 60]),
@@ -758,6 +957,18 @@ TIMING = [
     param(
         GlobCase(glob="*[ab]" * 7 + "*c", matches=[], misses=["a" * 58]),
         id="brackets",
+    ),
+    param(
+        GlobCase(glob="**/a/" * 11 + "abc", matches=[], misses=["a/" * 30 + "abd"]),
+        id="directories-almost-match",
+    ),
+    param(
+        GlobCase(glob="**/*/" * 10 + "b", matches=[], misses=["a/" * 31 + "a"]),
+        id="stars-between-double-stars",
+    ),
+    param(
+        GlobCase(glob="a/**/" * 11 + "b/**", matches=[], misses=["a/" * 31 + "a"]),
+        id="double-stars-then-double-star-at-end",
     ),
 ]
 
@@ -796,6 +1007,7 @@ def test_translate_glob__timing(case: GlobCase) -> None:
         *ESCAPES,
         *QUESTION_MARKS,
         *ASTERISKS,
+        *DOUBLE_ASTERISKS,
         *BRACKETS,
         *RANGES,
         *CLASSES,
@@ -815,12 +1027,12 @@ def test_translate_glob__git(tmp_path: Path, case: GlobCase) -> None:
     # from the root, as the rows do.
     line = format_pattern((case.glob, False, False, True))
 
+    lines = [line] if case.after is None else [line, case.after]
+
     # The ignore-file isn't one of the row's paths, so we leave it out, whether or not
     # the glob matches it.
     listed = [
-        path
-        for path in list_files(tmp_path / "tree", paths, [line])
-        if path != "ignore"
+        path for path in list_files(tmp_path / "tree", paths, lines) if path != "ignore"
     ]
 
     if case.divergence:

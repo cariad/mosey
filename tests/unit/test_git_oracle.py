@@ -5,7 +5,7 @@ from pathlib import Path
 from pytest import MonkeyPatch, mark, param, raises
 
 from tests.file_system_helpers import make_tree
-from tests.git_oracle import git_list_files
+from tests.git_oracle import git_list_files, has_git
 from tests.markers import needs_git, needs_posix_permissions
 
 
@@ -97,3 +97,9 @@ def test_git_list_files__read_is_denied(tmp_path: Path) -> None:
     finally:
         # Leave the file readable, as we found it.
         file.chmod(0o600)
+
+
+@needs_git
+def test_has_git() -> None:
+    """Git doesn't count when it's older than the version asked for."""
+    assert not has_git((1000, 0))
