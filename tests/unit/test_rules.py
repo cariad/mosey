@@ -38,8 +38,8 @@ def layers(case: RuleCase) -> Layers:
         case: The case to build the layers for.
 
     Returns:
-        The layers from the ignore-files in the entry's directory and every directory
-        above it.
+        The layers from the ignore-files in the directory that holds the entry and every
+        directory above it.
     """
     names = case.entry.removesuffix("/").split("/")
     found: list[Layer] = []

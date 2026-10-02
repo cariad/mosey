@@ -118,8 +118,8 @@ def is_ignored(layers: Layers, name: str, relative: str, is_dir: bool) -> bool:
     ```
 
     Args:
-        layers: The layers from the ignore-files in the entry's directory and every
-            directory above it, deepest first.
+        layers: The layers from the ignore-files in the directory that holds the entry
+            and every directory above it, deepest first.
         name: The entry's name.
         relative: The entry's path relative to the walk's root, with "/" between names.
         is_dir: Whether the entry is a directory. A symlink isn't, even one to a

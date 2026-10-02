@@ -2,12 +2,10 @@
 
 import errno
 import os
-import signal
 import sys
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from types import FrameType
 
 from pytest import mark, param, raises
 
@@ -23,6 +21,7 @@ from tests.file_system_helpers import (
     symlink_target,
 )
 from tests.markers import needs_fifos, needs_posix_permissions, needs_symlinks
+from tests.timeouts import alarm
 
 
 @mark.parametrize(
@@ -150,24 +149,11 @@ def test_read_ignore_file__fifo(tmp_path: Path) -> None:
     path = tmp_path / "ignore"
     make_fifo(path)
 
-    # `signal.setitimer` doesn't exist on Windows. This assertion convinces Pyright that
-    # we won't call it when we're running on Windows.
-    assert sys.platform != "win32"
-
     # Opening a FIFO normally waits until something opens it to write, which here would
     # be never. So we set an alarm: if the read waits for a second, the alarm interrupts
     # it, and the test fails rather than hangs.
-    def interrupt(signum: int, frame: FrameType | None) -> None:
-        raise TimeoutError("Waited for the FIFO to be opened for writing")
-
-    previous = signal.signal(signal.SIGALRM, interrupt)
-    signal.setitimer(signal.ITIMER_REAL, 1)
-
-    try:
+    with alarm(1, "Waited for the FIFO to be opened for writing"):
         assert read_ignore_file(os.fspath(path)) == b""
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
 
 
 @mark.skipif(

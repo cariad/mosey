@@ -1,10 +1,8 @@
 """Unit tests for the `translate_glob` function."""
 
 import re
-import signal
 import sys
 from pathlib import Path
-from types import FrameType
 from typing import NamedTuple
 
 from pytest import mark, param, skip
@@ -17,6 +15,7 @@ from tests.file_system_helpers import (
 )
 from tests.git_oracle import has_git
 from tests.markers import needs_git
+from tests.timeouts import alarm
 
 
 class GlobCase(NamedTuple):
@@ -980,23 +979,10 @@ TIMING = [
 @mark.parametrize("case", TIMING)
 def test_translate_glob__timing(case: GlobCase) -> None:
     """Globs that could stall a walk match in under a second."""
-    # `signal.setitimer` doesn't exist on Windows. This assertion convinces Pyright that
-    # we won't call it when we're running on Windows.
-    assert sys.platform != "win32"
-
     # If matching takes a second, the alarm interrupts it, and the test fails rather
     # than waits.
-    def interrupt(signum: int, frame: FrameType | None) -> None:
-        raise TimeoutError("Took over a second to match")
-
-    previous = signal.signal(signal.SIGALRM, interrupt)
-    signal.setitimer(signal.ITIMER_REAL, 1)
-
-    try:
+    with alarm(1, "Took over a second to match"):
         assert matching(case) == case.matches
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous)
 
 
 @needs_git
