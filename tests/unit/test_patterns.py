@@ -10,6 +10,7 @@ from tests.file_system_helpers import (
     format_pattern,
     list_files,
     skip_if_windows_cannot_create,
+    walk_files,
 )
 from tests.markers import needs_git
 
@@ -554,3 +555,23 @@ def test_parse_pattern__git(tmp_path: Path, case: PatternCase) -> None:
     # patterns in these tables and not only their listings.
     lines = before if case.expect is None else [*before, format_pattern(case.expect)]
     assert list_files(tmp_path / "pattern", case.tree, lines) == case.listed
+
+
+@mark.parametrize(
+    "case",
+    [
+        *TRAILING_SPACES,
+        *NEGATION,
+        *ESCAPES,
+        *DIRECTORY_ONLY,
+        *ANCHORING,
+        *NOTHING_LEFT,
+        *NEVER_MATCHES,
+    ],
+)
+def test_parse_pattern__walk(tmp_path: Path, case: PatternCase) -> None:
+    """The walk yields the expected files when the root's ignore-file holds the line."""
+    skip_if_windows_cannot_create(case.tree)
+
+    before = [] if case.before is None else [case.before]
+    assert walk_files(tmp_path / "tree", case.tree, [*before, case.line]) == case.listed

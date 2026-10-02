@@ -2,6 +2,7 @@
 
 import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -73,7 +74,14 @@ def list_files(root: Path, tree: list[str], lines: list[str]) -> list[str]:
     """
     root.mkdir()
     make_tree(root, *tree)
-    (root / "ignore").write_bytes("".join(f"{line}\n" for line in lines).encode())
+
+    write_ignore_files(
+        root,
+        {
+            "": lines,
+        },
+    )
+
     return git_list_files(root, "ignore")
 
 
@@ -281,16 +289,18 @@ def make_tree(root: Path, *paths: str) -> None:
             make_file(target)
 
 
-def relative_paths(root: Path) -> list[str]:
+def relative_paths(root: Path, ignore_filename: str | None = None) -> list[str]:
     """Walk a directory and return every step's relative path, in order.
 
     Args:
         root: Path to the directory to walk.
+        ignore_filename: The name of the ignore-files to read, or `None` to read none.
 
     Returns:
         The relative path of every step.
     """
-    return [step.relative_as_posix for step in Mosey().walk(root)]
+    walker = Mosey(ignore_filename=ignore_filename)
+    return [step.relative_as_posix for step in walker.walk(root)]
 
 
 def skip_if_windows_cannot_create(paths: list[str]) -> None:
@@ -311,6 +321,23 @@ def skip_if_windows_cannot_create(paths: list[str]) -> None:
             skip(f"Windows can't create {path!r}")
 
 
+def skip_if_windows_git_warns(root: Path, ignore_filename: str) -> None:
+    """Skip the test on Windows if Git would warn about a tree's ignore-files.
+
+    Windows can't open a directory as a file, so Git for Windows warns about a directory
+    named like the ignore-file, and `git_list_files` counts a warning as a failure.
+
+    Args:
+        root: Path to the tree's root.
+        ignore_filename: The ignore-file's name.
+    """
+    if sys.platform != "win32":
+        return
+
+    if any(path.is_dir() for path in root.rglob(ignore_filename)):
+        skip("Git for Windows can't open a directory named like the ignore-file")
+
+
 def symlink_target(path: Path) -> Path:
     """Return the path that a symlink made by these helpers will point to.
 
@@ -324,6 +351,30 @@ def symlink_target(path: Path) -> Path:
         Path to the symlink's target.
     """
     return path.with_name(f"{path.name}.target")
+
+
+def walk_files(root: Path, tree: list[str], lines: list[str]) -> list[str]:
+    """Create a tree with an ignore-file, and return the files the walk yields.
+
+    Args:
+        root: Path to the directory to create the tree in.
+        tree: Files and directories to create, as `make_tree` takes them.
+        lines: Lines to write to the ignore-file, named "ignore", in the root.
+
+    Returns:
+        The relative paths of the files the walk yields, in order.
+    """
+    root.mkdir()
+    make_tree(root, *tree)
+
+    write_ignore_files(
+        root,
+        {
+            "": lines,
+        },
+    )
+
+    return relative_paths(root, "ignore")
 
 
 def windows_can_create(path: str) -> bool:
@@ -350,18 +401,22 @@ def windows_can_create(path: str) -> bool:
     return True
 
 
-def write_ignore_files(root: Path, files: dict[str, list[str]]) -> None:
+def write_ignore_files(root: Path, files: Mapping[str, list[str] | bytes]) -> None:
     """Write an ignore-file, named "ignore", into each of several directories.
 
     Missing directories are created, `root` included.
 
     Args:
         root: Path to the tree's root.
-        files: Lines to write, by directory. Each directory is relative to `root` and
-            uses "/" as its separator on every operating system, or is "" for `root`
-            itself.
+        files: Lines to write, or the file's exact bytes, by directory. Each directory
+            is relative to `root` and uses "/" as its separator on every operating
+            system, or is "" for `root` itself.
     """
-    for directory, lines in files.items():
+    for directory, data in files.items():
         path = root / directory
         path.mkdir(parents=True, exist_ok=True)
-        (path / "ignore").write_bytes("".join(f"{line}\n" for line in lines).encode())
+
+        if isinstance(data, list):
+            data = "".join(f"{line}\n" for line in data).encode()
+
+        (path / "ignore").write_bytes(data)
