@@ -170,6 +170,18 @@ def make_nothing(path: Path) -> None:
     """
 
 
+def make_symlink_loop(path: Path) -> None:
+    """Create a symlink that points to itself.
+
+    Args:
+        path: Path to create the symlink at.
+
+    Raises:
+        FileExistsError: When `path` already exists.
+    """
+    path.symlink_to(path)
+
+
 def make_symlink_to_directory(path: Path) -> None:
     """Create a symlink to a directory.
 

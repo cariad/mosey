@@ -1,4 +1,4 @@
-"""Unit tests for the `directories` module."""
+"""Unit tests for the `list_candidates` function."""
 
 import errno
 import os
