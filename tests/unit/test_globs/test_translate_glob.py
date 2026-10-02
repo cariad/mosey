@@ -13,7 +13,7 @@ from tests.file_system_helpers import (
     list_files,
     skip_if_windows_cannot_create,
 )
-from tests.git_oracle import has_git
+from tests.git_oracle import ESCAPED_SLASH, ONE_BYTE, has_git
 from tests.markers import needs_git
 from tests.timeouts import alarm
 
@@ -40,12 +40,6 @@ class GlobCase(NamedTuple):
     divergence: str | None = None
     """Why Git matches differently, if it does."""
 
-
-ONE_BYTE = 'Git\'s "?" and "[...]" match one byte, and Mosey\'s match one character'
-"""Why Git matches some non-ASCII names differently."""
-
-ESCAPED_SLASH = 'Git\'s "**" before an escaped "/" stands for at least one directory'
-"""Why Git matches a "**" before an escaped "/" differently."""
 
 BEFORE_GIT_2_52 = (
     None if has_git((2, 52)) else 'Git before 2.52 matches "foo**/bar" against "foobar"'

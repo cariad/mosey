@@ -29,6 +29,12 @@ comparisons.
 TIMEOUT: Final[float] = 10
 """Seconds to wait for any Git command before giving up."""
 
+ONE_BYTE = 'Git\'s "?" and "[...]" match one byte, and Mosey\'s match one character'
+"""Why Git matches some non-ASCII names differently."""
+
+ESCAPED_SLASH = 'Git\'s "**" before an escaped "/" stands for at least one directory'
+"""Why Git matches a "**" before an escaped "/" differently."""
+
 
 def git_environment() -> dict[str, str]:
     """Return the environment to run Git in.

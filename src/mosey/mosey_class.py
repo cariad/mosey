@@ -10,7 +10,7 @@ import stat
 from collections.abc import Iterator
 from pathlib import Path
 
-from .directories import list_candidates
+from .directories import list_candidates, read_directory
 from .exceptions import raise_file_not_found
 from .step import Step
 
@@ -18,8 +18,36 @@ from .step import Step
 class Mosey:
     """A directory walker."""
 
+    def __init__(self, *, ignore_filename: str | None = None) -> None:
+        """Create a directory walker.
+
+        Args:
+            ignore_filename: Filename of the ignore-files to read. For example,
+                `.ignore`.
+
+                Files and directories that patterns in these files ignore won't be
+                yielded or walked.
+
+                Omit or pass `None` to walk the directory without any ignore-file rules.
+
+        Raises:
+            ValueError: When `ignore_filename` is empty, "." or "..", or holds a slash,
+                a backslash or a null character.
+        """
+        # The name is a filename, not a path. A backslash is refused on every operating
+        # system, not only on Windows, so that the same names are accepted everywhere.
+        if ignore_filename is not None and (
+            ignore_filename in ("", ".", "..")
+            or "/" in ignore_filename
+            or "\\" in ignore_filename
+            or "\x00" in ignore_filename
+        ):
+            raise ValueError(f"{ignore_filename!r} isn't a filename")
+
+        self._ignore_filename = ignore_filename
+
     def _iterate(self, root: Path) -> Iterator[Step]:
-        """Walk a directory and yield a `Step` for every file.
+        """Walk a directory and yield a `Step` for every file that isn't ignored.
 
         The walk is depth-first and yields files in the walk order documented at
         https://cariad.github.io/mosey/walk-order/.
@@ -30,7 +58,7 @@ class Mosey:
             root: Path to the directory to walk.
 
         Yields:
-            A `Step` for every file beneath `root`.
+            A `Step` for every file beneath `root` that isn't ignored.
         """
         # The walk keeps its own stack of directories rather than recursing. A recursive
         # generator would pass every file up through one `yield from` per level, so the
@@ -45,6 +73,9 @@ class Mosey:
         #  - An iterator over the directory's remaining candidates. It has to be an
         #    iterator rather than the list itself, so that the `for` loop below resumes
         #    where it left off instead of starting the list again.
+        #  - The layers from the ignore-files in the directory and every directory above
+        #    it, deepest first, for reading its subdirectories. They're always empty
+        #    when there's no ignore-file name.
         #
         # A relative root is resolved against the working directory each time a
         # directory is listed, so changing the working directory partway through a walk
@@ -52,7 +83,23 @@ class Mosey:
         # starts with the same relative root, so it would point into the new directory
         # anyway. `os.walk` behaves the same way.
         root_str = os.fspath(root)
-        stack = [(root_str, "", iter(list_candidates(root_str)))]
+
+        # NOTE: We check for an ignore-file name here and for every subdirectory below,
+        # NOTE: rather than keep a second copy of the loop for walks without a name. On
+        # NOTE: Python 3.11 to 3.14 on arm64 macOS, a walk with no name took 0-0.6%
+        # NOTE: longer than before ignore-files, and a walk with a name that no file in
+        # NOTE: the tree has took 0.6-1.4% longer.
+        if self._ignore_filename is None:
+            root_candidates, root_layers = list_candidates(root_str), ()
+        else:
+            root_candidates, root_layers = read_directory(
+                root_str,
+                "",
+                (),
+                self._ignore_filename,
+            )
+
+        stack = [(root_str, "", iter(root_candidates), root_layers)]
 
         # NOTE: Some reviewers suggest a loop that takes one candidate at a time with
         # NOTE: `next(iterator, None)` instead, and never breaks out of a `for` loop.
@@ -61,15 +108,25 @@ class Mosey:
         # NOTE: macOS; the `next` approach took 20-26% longer looping per file, which
         # NOTE: made a walk of a real directory about 2% slower.
         while stack:
-            directory, prefix, candidates = stack[-1]
+            directory, prefix, candidates, layers = stack[-1]
 
             for name, is_dir in candidates:
                 if is_dir:
                     path = os.path.join(directory, name)
+                    path_prefix = prefix + name + "/"
+
+                    # Without an ignore-file name, the subdirectory is listed exactly as
+                    # it would be if ignore-files didn't exist.
+                    if self._ignore_filename is None:
+                        path_candidates, path_layers = list_candidates(path), layers
+                    else:
+                        path_candidates, path_layers = read_directory(
+                            path, path_prefix, layers, self._ignore_filename
+                        )
 
                     # Add this subdirectory to the stack...
                     stack.append(
-                        (path, prefix + name + "/", iter(list_candidates(path)))
+                        (path, path_prefix, iter(path_candidates), path_layers)
                     )
 
                     # ...and now break to walk it.
@@ -86,10 +143,14 @@ class Mosey:
                 stack.pop()
 
     def walk(self, root: os.PathLike[str] | str) -> Iterator[Step]:
-        """Walk a directory and yield a [`Step`][mosey.Step] for every file.
+        """Walk a directory and yield a [`Step`][mosey.Step] for every file not ignored.
 
         Files are yielded in a deterministic walk order, documented at
         https://cariad.github.io/mosey/walk-order/.
+
+        With an ignore-file name set, each directory's ignore-file is read when the walk
+        reaches the directory, and the files and directories its patterns ignore aren't
+        yielded or walked, along with everything inside them.
 
         A relative root is found from the working directory each time a subdirectory is
         read, so don't change the working directory during a walk.
@@ -98,12 +159,17 @@ class Mosey:
             root: Path to the directory to walk.
 
         Returns:
-            An iterator of [`Step`][mosey.Step]; one for every file.
+            An iterator of [`Step`][mosey.Step]; one for every file not ignored.
 
                 The iterator raises [`OSError`][] when it can't list `root` or a
                 directory beneath it, say because it vanished, or permissions deny
-                reading it or searching the directory that holds it. `root` itself isn't
-                listed until the first step is requested.
+                reading it or searching the directory that holds it.
+
+                With an ignore-file name set, it also raises [`OSError`][] when it can't
+                read an ignore-file, say because it's a broken symlink or permissions
+                deny reading it.
+
+                `root` itself isn't listed until the first step is requested.
 
         Raises:
             FileNotFoundError: When `root` is empty, doesn't exist, or can't exist (e.g.
