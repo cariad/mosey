@@ -353,6 +353,18 @@ def symlink_target(path: Path) -> Path:
     return path.with_name(f"{path.name}.target")
 
 
+def symlinks_allowed() -> bool:
+    """Check if tests should make symlinks.
+
+    GitHub Actions' runners can make symlinks, so in CI a test that makes them fails if
+    they can't be made, rather than skipping or leaving them out.
+
+    Returns:
+        `True` if symlinks can be created, or the tests are running in CI.
+    """
+    return can_make_symlinks() or bool(os.environ.get("CI"))
+
+
 def walk_files(root: Path, tree: list[str], lines: list[str]) -> list[str]:
     """Create a tree with an ignore-file, and return the files the walk yields.
 
