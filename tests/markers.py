@@ -5,7 +5,7 @@ import sys
 
 from pytest import mark
 
-from tests.file_system_helpers import can_make_symlinks
+from tests.file_system_helpers import symlinks_allowed
 from tests.git_oracle import MINIMUM_VERSION, has_git
 
 needs_fifos = mark.skipif(
@@ -46,7 +46,7 @@ Such a test can't be set up:
 needs_symlinks = mark.skipif(
     # GitHub Actions' Windows runners *should* be able to create symlinks, so let's fail
     # rather than skip if that configuration changes.
-    not can_make_symlinks() and not os.environ.get("CI"),
+    not symlinks_allowed(),
     reason="Windows needs admin rights or Developer Mode to create symlinks",
 )
 """Skips a test that relies on creating symlinks, unless running in CI."""
