@@ -25,24 +25,16 @@ The elements are:
 
 
 def parse_pattern(text: str) -> Pattern | None:
-    r"""Return a line of an ignore-file parsed into a pattern.
+    """Return a line of an ignore-file parsed into a pattern.
 
     Trailing spaces are removed, unless a backslash escapes one. Then a "!" at the start
     negates the pattern, a "/" at the end means it only matches directories, and a "/"
-    anywhere else anchors it. One "/" at the start is removed:
-
-    ```text
-    Line      Glob    Negated  Directories only  Anchored
-    "a  "     "a"     no       no                no
-    "a\  "    "a\ "   no       no                no
-    "!a"      "a"     yes      no                no
-    "a/"      "a"     no       yes               no
-    "/a"      "a"     no       no                yes
-    "a/b"     "a/b"   no       no                yes
-    ```
+    anywhere else anchors it. One "/" at the start is removed.
 
     Everything else stays in the glob exactly as written. Nothing is tidied up, so lines
     like "./a" and "a//b" parse, but can never match a path.
+
+    Ignore-files are documented at https://cariad.github.io/mosey/ignore-files/.
 
     Args:
         text: The line to parse.

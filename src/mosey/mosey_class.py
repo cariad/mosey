@@ -22,8 +22,8 @@ class Mosey:
         """Create a directory walker.
 
         Args:
-            ignore_filename: Filename of the ignore-files to read. For example,
-                `.ignore`.
+            ignore_filename: Filename of the [ignore-files][ignore-files] to read. For
+                example, `.walkignore`.
 
                 Files and directories that patterns in these files ignore won't be
                 yielded or walked.
@@ -148,9 +148,9 @@ class Mosey:
         Files are yielded in a deterministic walk order, documented at
         https://cariad.github.io/mosey/walk-order/.
 
-        With an ignore-file name set, each directory's ignore-file is read when the walk
-        reaches the directory, and the files and directories its patterns ignore aren't
-        yielded or walked, along with everything inside them.
+        With an ignore-file name set, each directory's [ignore-file][ignore-files] is
+        read when the walk reaches the directory, and the files and directories its
+        patterns ignore aren't yielded or walked, along with everything inside them.
 
         A relative root is found from the working directory each time a subdirectory is
         read, so don't change the working directory during a walk.
