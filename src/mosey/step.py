@@ -61,11 +61,11 @@ class Step:
     relative_as_posix: Final[str]
     """The object's path relative to [`root`][] as a POSIX-style string.
 
-    Fast to read, and the same format as the ignore-files' patterns.
+    Fast to read, and the same format as the [ignore-files'][ignore-files] patterns.
 
-    POSIX-style paths always use forward-slashes as separators regardless of the
+    POSIX-style paths always use forward slashes as separators regardless of the
     operating system, so this string will look familiar to Linux and macOS users
-    but might be surprising in Windows where back-slashes are conventional.
+    but might be surprising in Windows where backslashes are conventional.
 
     If you need a path in the local operating system's convention, read [`path`][].
 

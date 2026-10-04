@@ -541,6 +541,46 @@ def test_walk__git(tmp_path: Path, case: IgnoreCase) -> None:
     assert listed == case.listed
 
 
+@mark.parametrize(
+    "list_paths",
+    [
+        param(relative_paths, id="walk"),
+        param(git_list_files, marks=needs_git, id="git"),
+    ],
+)
+def test_walk__example(
+    tmp_path: Path,
+    list_paths: Callable[[Path, str], list[str]],
+) -> None:
+    """The ignore-files page's example lists the files the page says."""
+    # The example from the ignore-files page, with its ignore-files named as the page
+    # names them.
+    make_tree(
+        tmp_path,
+        "build/app.log",
+        "debug.log",
+        "readme.md",
+        "todo.txt",
+        "tools/build",
+        "tools/debug.log",
+        "tools/keep.log",
+        "tools/todo.txt",
+    )
+
+    (tmp_path / ".walkignore").write_bytes(b"*.log\nbuild/\n/todo.txt\n")
+    (tmp_path / "build" / ".walkignore").write_bytes(b"!app.log\n")
+    (tmp_path / "tools" / ".walkignore").write_bytes(b"!keep.log\n")
+
+    assert list_paths(tmp_path, ".walkignore") == [
+        ".walkignore",
+        "readme.md",
+        "tools/.walkignore",
+        "tools/build",
+        "tools/keep.log",
+        "tools/todo.txt",
+    ]
+
+
 @needs_symlinks
 def test_walk__ignore_file_is_broken_symlink(tmp_path: Path) -> None:
     """A broken symlinked ignore-file raises when the walk reaches its directory."""

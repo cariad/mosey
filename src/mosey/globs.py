@@ -131,45 +131,9 @@ def translate_bracket(glob: str, start: int) -> tuple[str, int] | None:
 
 
 def translate_glob(glob: str) -> str | None:
-    r"""Return a glob translated into a regular expression.
+    """Return a glob translated into a regular expression.
 
-    A "*" matches any run of characters, even none, and a "?" matches exactly one. A
-    bracket expression matches one character from a set. None of them matches a "/". A
-    backslash makes the character after it literal, and every other character matches
-    only itself:
-
-    ```text
-    Glob            Matches         Doesn't match
-    "a*"            "a", "abc"      "ba", "a/b"
-    "a?c"           "abc"           "ac", "a/c"
-    "a\*"           "a*"            "ab"
-    "a[bc]"         "ab", "ac"      "ad", "abc"
-    "a[!b]c"        "adc"           "abc", "a/c"
-    "a[b-d]"        "ac"            "ae"
-    "a[[:digit:]]"  "a1"            "ab"
-    "**/a"          "a", "b/c/a"    "ba"
-    "a/**/b"        "a/b", "a/c/b"  "ab"
-    "a/**"          "a/b", "a/b/c"  "a"
-    ```
-
-    In a bracket expression, a "!" or "^" straight after the "[" negates the set, and a
-    "]" first in the set is a member rather than the end. A range whose ends are the
-    wrong way round, like "y-a", matches only its first character. A "-" is a member
-    when it's first or last in the set, or straight after a range or a class. A
-    backslash makes the character after it a member. The classes are "[:alnum:]",
-    "[:alpha:]", "[:blank:]", "[:cntrl:]", "[:digit:]", "[:graph:]", "[:lower:]",
-    "[:print:]", "[:punct:]", "[:space:]", "[:upper:]" and "[:xdigit:]", and they hold
-    ASCII characters only.
-
-    A "**" can match "/" when it makes up a whole path segment, with only the start of
-    the glob or a "/" before it, and only a "/" or the end of the glob after it. Then
-    "**/" matches any number of directories, even none, and a "**" at the end matches
-    everything inside the directory before it, or everything at all when it's the whole
-    glob. A "/" next to it counts whether it's escaped or not, and "***" is the same as
-    "**". Any other run of "*" matches the same as one "*".
-
-    A "?" or a bracket expression matches one character, even one that takes several
-    bytes, so "caf?" and "caf[!x]" match "café".
+    Ignore-files are documented at https://cariad.github.io/mosey/ignore-files/.
 
     Args:
         glob: The glob to translate.

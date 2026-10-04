@@ -94,28 +94,9 @@ def is_ignored(layers: Layers, name: str, relative: str, is_dir: bool) -> bool:
     """Check if a directory entry is ignored.
 
     The deepest ignore-file with a line that matches the entry decides, and within it,
-    the last line that matches. A line starting with "!" keeps what it matches, and an
-    entry that no line matches is kept too. A line ending with "/" only matches
-    directories. A line with any other "/" matches the entry's path from its
-    ignore-file's directory, and any other line matches the entry's name, at any depth.
-    For example, with these ignore-files:
+    the last line that matches.
 
-    ```text
-    Ignore-file   Lines
-    "ignore"      "*.log", "build/"
-    "sub/ignore"  "!keep.log", "/top"
-    ```
-
-    ```text
-    Entry                 Ignored  Why
-    "a.log"               yes      "*.log"
-    "sub/a.log"           yes      "*.log", since no line in "sub/ignore" matches
-    "sub/keep.log"        no       "!keep.log", in the deeper ignore-file
-    "sub/top"             yes      "/top"
-    "sub/x/top"           no       "/top" only matches "top" beside "sub/ignore"
-    "build", a directory  yes      "build/"
-    "build", a file       no       "build/" only matches directories
-    ```
+    Ignore-files are documented at https://cariad.github.io/mosey/ignore-files/.
 
     Args:
         layers: The layers from the ignore-files in the directory that holds the entry

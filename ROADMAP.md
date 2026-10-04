@@ -16,10 +16,8 @@ This is a statement of intent, not a promise! Mosey is in early development, and
 
 - Implement `__fspath__` in `Step` to make it `os.PathLike`. This'll let developers call, say, `open(step)` instead of `open(step.path)`.
 
-## Notes to self
+### Ignore-files
 
-Things to remember when ignore-files arrive:
-
-- Patterns will match names exactly as the file system reports them, so a pattern spelled with a composed accent won't match a name reported with a decomposed one.
-- A symlink to a directory is a file, so a directory-only pattern like `foo/` won't match it. Think about that.
-- A line holding a zero byte is dropped, so it never matches anything. Windows PowerShell 5.1 writes lines like that when `>>` appends to an existing file, and leaves a zero byte at the start of the next line too. And if the file didn't end with a newline, the text joins the file's last line, so that line is dropped as well. Say so on the ignore-files page.
+- Take patterns from the caller, as well as from ignore-files.
+- Read ignore-files in the directories above the root, if configured to.
+- Explain why a path was ignored: which ignore-file, and which line of it.

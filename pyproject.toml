@@ -107,8 +107,12 @@ disable = [
 ]
 flavor = "mkdocs" # Understand admonitions, content tabs and autorefs in `docs/`
 
+[tool.rumdl.list-continuation-indent]
+style = "aligned" # List content must align with its parent item's text
+
 [tool.rumdl.no-trailing-spaces]
 br-spaces = 0 # Don't use trailing whitespace as line breaks
+strict = true # Check code blocks too
 
 [tool.uv]
 # NOTE: uv is pre-1.0 and minor releases may break our usage. Bump this deliberately
