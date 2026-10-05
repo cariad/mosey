@@ -84,6 +84,58 @@ PRECEDENCE = [
         RuleCase(files={"": ["a", "!a", "a"]}, entry="a", ignored=True),
         id="repeated-line",
     ),
+    # A plain name and a wildcard both match, and the later line decides, whichever
+    # kind it is and whichever is negated. (`wildcard-then-re-include` is the fourth
+    # way round.)
+    param(
+        RuleCase(files={"": ["a", "!a*"]}, entry="a", ignored=False),
+        id="plain-name-then-negated-wildcard",
+    ),
+    param(
+        RuleCase(files={"": ["!a", "a*"]}, entry="a", ignored=True),
+        id="negated-plain-name-then-wildcard",
+    ),
+    param(
+        RuleCase(files={"": ["!a*", "a"]}, entry="a", ignored=True),
+        id="negated-wildcard-then-plain-name",
+    ),
+    # The same for a plain path. In the first, the wildcard matches the name rather
+    # than the path.
+    param(
+        RuleCase(files={"": ["/a", "!a*"]}, entry="a", ignored=False),
+        id="plain-path-then-negated-wildcard",
+    ),
+    param(
+        RuleCase(files={"": ["!/a", "/a*"]}, entry="a", ignored=True),
+        id="negated-plain-path-then-wildcard",
+    ),
+    param(
+        RuleCase(files={"": ["/a*", "!/a"]}, entry="a", ignored=False),
+        id="wildcard-then-negated-plain-path",
+    ),
+    param(
+        RuleCase(files={"": ["!/a*", "/a"]}, entry="a", ignored=True),
+        id="negated-wildcard-then-plain-path",
+    ),
+    # A plain name and a plain path both match, and the later line decides.
+    param(
+        RuleCase(files={"": ["a", "!/a"]}, entry="a", ignored=False),
+        id="plain-name-then-negated-plain-path",
+    ),
+    param(
+        RuleCase(files={"": ["/a", "!a"]}, entry="a", ignored=False),
+        id="plain-path-then-negated-plain-name",
+    ),
+    # Two wildcards match, and the later one decides. The last line doesn't match, and
+    # changes nothing.
+    param(
+        RuleCase(
+            files={"": ["*.log", "!keep*", "*.tmp"]},
+            entry="keep.log",
+            ignored=False,
+        ),
+        id="wildcard-then-negated-wildcard",
+    ),
 ]
 
 
@@ -202,6 +254,10 @@ DIRECTORY_ONLY = [
         RuleCase(files={"": ["a/", "!a"]}, entry="a/", ignored=False),
         id="plain-line-after-directory-only",
     ),
+    param(
+        RuleCase(files={"": ["*/", "!a"]}, entry="a/", ignored=False),
+        id="plain-line-after-directory-only-wildcard",
+    ),
 ]
 
 
@@ -238,6 +294,10 @@ ANCHORING = [
     param(
         RuleCase(files={"a": ["/a/a"]}, entry="a/a/a", ignored=True),
         id="nested-anchored-same-name",
+    ),
+    param(
+        RuleCase(files={"a": ["/a/*"]}, entry="a/a/a", ignored=True),
+        id="nested-anchored-wildcard-same-name",
     ),
     param(
         RuleCase(files={"": ["a/b"]}, entry="a/b", ignored=True),
@@ -305,6 +365,19 @@ UNANCHORED = [
         RuleCase(files={"": ["*.log"]}, entry="x/y.log", ignored=True),
         id="wildcard-at-depth",
     ),
+    # A "?", a bracket or a backslash means the line isn't a plain name.
+    param(
+        RuleCase(files={"": ["a?"]}, entry="ab", ignored=True),
+        id="question-mark",
+    ),
+    param(
+        RuleCase(files={"": ["[ab]"]}, entry="a", ignored=True),
+        id="brackets",
+    ),
+    param(
+        RuleCase(files={"": ["\\#a"]}, entry="#a", ignored=True),
+        id="escaped-hash",
+    ),
     param(
         RuleCase(files={"": ["build/"]}, entry="sub/build/", ignored=True),
         id="directory-only-at-depth",
@@ -314,8 +387,16 @@ UNANCHORED = [
         id="whole-name",
     ),
     param(
+        RuleCase(files={"": ["*.log"]}, entry="x.logs", ignored=False),
+        id="whole-name-wildcard",
+    ),
+    param(
         RuleCase(files={"": ["A"]}, entry="a", ignored=False),
         id="case",
+    ),
+    param(
+        RuleCase(files={"": ["A*"]}, entry="a", ignored=False),
+        id="case-wildcard",
     ),
     # Only spaces are trimmed from the end of a line, so the tab is part of the name.
     param(
@@ -326,6 +407,10 @@ UNANCHORED = [
     param(
         RuleCase(files={"": ["x", "!x/"]}, entry="x/a", ignored=False),
         id="name-of-directory-above",
+    ),
+    param(
+        RuleCase(files={"": ["x*", "!x*/"]}, entry="x/a", ignored=False),
+        id="wildcard-name-of-directory-above",
     ),
 ]
 
@@ -435,6 +520,10 @@ MALFORMED = [
     param(
         RuleCase(files={"": ["[a", "b"]}, entry="b", ignored=True),
         id="malformed-beside-another-line",
+    ),
+    param(
+        RuleCase(files={"": ["!", "b"]}, entry="b", ignored=True),
+        id="nothing-left-beside-another-line",
     ),
     param(
         RuleCase(files={"": ["a", "!"]}, entry="a", ignored=True),
