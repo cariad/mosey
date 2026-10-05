@@ -1,6 +1,6 @@
 [build-system]
 build-backend = "hatchling.build"
-requires = ["hatchling"]
+requires = ["hatch-vcs", "hatchling"]
 
 [dependency-groups]
 # We don't include `actionlint` in `dev` because it builds from source and downloads a
@@ -41,13 +41,26 @@ docs = [
 
 [project]
 authors = [{ name = "Cariad Eccleston", email = "cariad@cariad.earth" }]
-classifiers = ["Development Status :: 3 - Alpha"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Typing :: Typed",
+]
 description = "A directory walker that respects ignore-files"
+dynamic = ["version"]
 license = "MIT"
 name = "mosey"
 readme = "README.md"
 requires-python = ">=3.11"
-version = "0.1.0"
+
+[project.urls]
+Documentation = "https://cariad.github.io/mosey/"
+Issues = "https://github.com/cariad/mosey/issues"
+Source = "https://github.com/cariad/mosey"
 
 [tool.coverage.report]
 # This project contains portions of operating system-specific code (for example, code to
@@ -70,6 +83,9 @@ branch = true
 # combine data from across operating systems
 relative_files = true
 source = ["mosey"]
+
+[tool.hatch.version]
+source = "vcs"
 
 [tool.pyright]
 pythonVersion = "3.11"
