@@ -140,8 +140,13 @@ def translate_glob(glob: str) -> str | None:
 
     Returns:
         A regular expression that matches the whole of every name or path the glob
-        matches, for use with `fullmatch`. `None` if the glob ends with a backslash that
-        escapes nothing, holds a "[" that nothing closes, or names an unknown class.
+        matches, for use with `fullmatch`.
+
+        The expression holds no capturing group, so several can be joined into one and
+        still indicate which one matched.
+
+        Returns `None` if the glob ends with a backslash that escapes nothing, holds a
+        "[" that nothing closes, or names an unknown class.
     """
     # NOTE: Jumping from one special part to the next with `search`, rather than
     # NOTE: stepping through the glob one character at a time, makes translating a 96-

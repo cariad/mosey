@@ -979,6 +979,33 @@ def test_translate_glob__timing(case: GlobCase) -> None:
         assert matching(case) == case.matches
 
 
+@mark.parametrize(
+    "case",
+    [
+        *LITERALS,
+        *ESCAPES,
+        *QUESTION_MARKS,
+        *ASTERISKS,
+        *DOUBLE_ASTERISKS,
+        *BRACKETS,
+        *RANGES,
+        *CLASSES,
+        *NON_ASCII,
+        *NEVER_MATCHES,
+        *TIMING,
+    ],
+)
+def test_translate_glob__no_capturing_groups(case: GlobCase) -> None:
+    """A translation holds no capturing group."""
+    source = translate_glob(case.glob)
+    assert source is not None
+
+    # `compile_rules` joins translations into one regular expression, and tells which
+    # one matched by the groups it adds after each, so a group in a translation would
+    # throw the numbering off.
+    assert re.compile(source).groups == 0
+
+
 @needs_git
 @mark.parametrize(
     "case",
