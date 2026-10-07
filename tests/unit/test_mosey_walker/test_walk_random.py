@@ -1,4 +1,4 @@
-"""Unit tests that compare the `Mosey.walk` function with Git on random trees."""
+"""Unit tests that compare the `MoseyWalker.walk` function with Git on random trees."""
 
 import sys
 from pathlib import Path

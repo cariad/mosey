@@ -1,4 +1,4 @@
-"""Unit tests for the `Mosey.walk` function with an ignore-file name."""
+"""Unit tests for the `MoseyWalker.walk` function with an ignore-file name."""
 
 import errno
 import os
@@ -13,6 +13,7 @@ from pytest import mark, param, raises, skip
 import mosey
 from mosey import Mosey
 from tests.file_system_helpers import (
+    build_walker,
     make_broken_symlink,
     make_symlink_to_file,
     make_tree,
@@ -586,7 +587,7 @@ def test_walk__ignore_file_is_broken_symlink(tmp_path: Path) -> None:
     """A broken symlinked ignore-file raises when the walk reaches its directory."""
     make_tree(tmp_path, "a", "b/c", "d")
     make_broken_symlink(tmp_path / "b" / "ignore")
-    steps = Mosey(ignore_filename="ignore").walk(tmp_path)
+    steps = build_walker("ignore").walk(tmp_path)
 
     # Everything before "b" is yielded...
     assert next(steps).relative_as_posix == "a"
@@ -625,7 +626,7 @@ def test_walk__ignore_file_read_is_denied(tmp_path: Path) -> None:
 
     try:
         # The root's ignore-file isn't read until the first step is requested...
-        steps = Mosey(ignore_filename="ignore").walk(tmp_path)
+        steps = build_walker("ignore").walk(tmp_path)
 
         # ...so that's when the error comes.
         with raises(PermissionError) as raised:
@@ -676,7 +677,7 @@ def test_walk__lazy_directory_ignore_file(tmp_path: Path) -> None:
     """A directory's ignore-file isn't read until the walk reaches the directory."""
     make_tree(tmp_path, "a", "b/x", "b/y")
     write_ignore_files(tmp_path, {"b": ["x"]})
-    steps = Mosey(ignore_filename="ignore").walk(tmp_path)
+    steps = build_walker("ignore").walk(tmp_path)
 
     assert next(steps).relative_as_posix == "a"
 
@@ -691,25 +692,18 @@ def test_walk__lazy_root_ignore_file(tmp_path: Path) -> None:
     """The root's ignore-file isn't read until the first step is requested."""
     make_tree(tmp_path, "a", "b")
     write_ignore_files(tmp_path, {"": ["a"]})
-    steps = Mosey(ignore_filename="ignore").walk(tmp_path)
+    steps = build_walker("ignore").walk(tmp_path)
     write_ignore_files(tmp_path, {"": ["b"]})
 
     assert [step.relative_as_posix for step in steps] == ["a", "ignore"]
 
 
-@mark.parametrize(
-    "make",
-    [
-        param(Mosey, id="default"),
-        param(lambda: Mosey(ignore_filename=None), id="none"),
-    ],
-)
-def test_walk__no_ignore_filename(tmp_path: Path, make: Callable[[], Mosey]) -> None:
+def test_walk__no_ignore_filename(tmp_path: Path) -> None:
     """Without an ignore-file name, no file is read as an ignore-file."""
     make_tree(tmp_path, "a", "b/c")
     write_ignore_files(tmp_path, {"": ["a"], "b": ["*"]})
 
-    assert [step.relative_as_posix for step in make().walk(tmp_path)] == [
+    assert [step.relative_as_posix for step in Mosey().build().walk(tmp_path)] == [
         "a",
         "b/c",
         "b/ignore",
@@ -751,7 +745,9 @@ def test_walk__not_utf8(tmp_path: Path) -> None:
         "from mosey import Mosey\n"
         "encoding = sys.getfilesystemencoding()\n"
         "assert encoding != 'utf-8', encoding\n"
-        "steps = Mosey(ignore_filename='ignore').walk(sys.argv[1])\n"
+        "builder = Mosey()\n"
+        "builder.set_ignore_filename('ignore')\n"
+        "steps = builder.build().walk(sys.argv[1])\n"
         "paths = [os.fsencode(step.relative_as_posix) for step in steps]\n"
         "sys.stdout.buffer.write(b'\\0'.join(paths))\n"
     )
@@ -780,7 +776,7 @@ def test_walk__same_root_twice(tmp_path: Path) -> None:
     """Each walk reads the ignore-files again, so it sees any change since the last."""
     make_tree(tmp_path, "a", "b")
     write_ignore_files(tmp_path, {"": ["a"]})
-    walker = Mosey(ignore_filename="ignore")
+    walker = build_walker("ignore")
 
     assert [step.relative_as_posix for step in walker.walk(tmp_path)] == ["b", "ignore"]
 
@@ -801,7 +797,7 @@ def test_walk__search_is_denied(tmp_path: Path) -> None:
     path.chmod(0o600)
 
     try:
-        steps = Mosey(ignore_filename="ignore").walk(tmp_path)
+        steps = build_walker("ignore").walk(tmp_path)
 
         assert next(steps).relative_as_posix == "a"
 

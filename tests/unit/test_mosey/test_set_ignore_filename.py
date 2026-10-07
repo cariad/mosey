@@ -1,13 +1,11 @@
-"""Unit tests for initialisation of the `Mosey` class."""
+"""Unit tests for the `Mosey.set_ignore_filename` function."""
+
+from pathlib import Path
 
 from pytest import mark, param, raises
 
 from mosey import Mosey
-
-
-def test_mosey_init() -> None:
-    """Instantiating `Mosey` does not raise any exceptions."""
-    Mosey()
+from tests.file_system_helpers import make_tree
 
 
 @mark.parametrize(
@@ -22,9 +20,9 @@ def test_mosey_init() -> None:
         param("café", id="non-ascii"),
     ],
 )
-def test_mosey_init__ignore_filename(name: str) -> None:
+def test_set_ignore_filename(name: str) -> None:
     """Any name that isn't a path is accepted as the ignore-file name."""
-    Mosey(ignore_filename=name)
+    Mosey().set_ignore_filename(name)
 
 
 @mark.parametrize(
@@ -42,16 +40,25 @@ def test_mosey_init__ignore_filename(name: str) -> None:
         param("a\x00b", id="null"),
     ],
 )
-def test_mosey_init__ignore_filename_is_not_a_name(name: str) -> None:
+def test_set_ignore_filename__not_a_filename(name: str) -> None:
     """`ValueError` is raised when the ignore-file name isn't a plain name."""
-    # Raised by `Mosey` itself, before anything is walked.
+    # Raised by `Mosey` itself, before anything is built or walked.
     with raises(ValueError) as raised:
-        Mosey(ignore_filename=name)
+        Mosey().set_ignore_filename(name)
 
     assert str(raised.value) == f"{name!r} isn't a filename"
 
 
-def test_mosey_init__ignore_filename_is_keyword_only() -> None:
-    """`TypeError` is raised when the ignore-file name is passed by position."""
-    with raises(TypeError):
-        Mosey("ignore")  # pyright: ignore[reportCallIssue]
+def test_set_ignore_filename__replaces(tmp_path: Path) -> None:
+    """Setting the ignore-file name again replaces the name set before."""
+    make_tree(tmp_path, "x", "y")
+    (tmp_path / "a").write_bytes(b"x\n")
+    (tmp_path / "b").write_bytes(b"y\n")
+
+    builder = Mosey()
+    builder.set_ignore_filename("a")
+    builder.set_ignore_filename("b")
+    walker = builder.build()
+
+    # Only "b" is read, so "x" is yielded and "y" isn't.
+    assert [step.relative_as_posix for step in walker.walk(tmp_path)] == ["a", "b", "x"]

@@ -98,7 +98,7 @@ build/
 !keep.log
 ```
 
-Walking the `root` directory with `Mosey(ignore_filename=".walkignore")` yields these files, in the usual [walk order](walk-order.md):
+Walking the `root` directory with a walker whose ignore-file name is `.walkignore` (set with [`Mosey.set_ignore_filename`][mosey.Mosey.set_ignore_filename]) yields these files, in the usual [walk order](walk-order.md):
 
 ```text
 .walkignore
