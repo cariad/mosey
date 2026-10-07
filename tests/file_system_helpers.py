@@ -8,9 +8,26 @@ from tempfile import TemporaryDirectory
 
 from pytest import skip
 
-from mosey import Mosey
+from mosey import Mosey, Walker
 from mosey.patterns import Pattern
 from tests.git_oracle import git_list_files
+
+
+def build_walker(ignore_filename: str | None = None) -> Walker:
+    """Build a walker with the public builder.
+
+    Args:
+        ignore_filename: The name of the ignore-files to read, or `None` to read none.
+
+    Returns:
+        The walker.
+    """
+    builder = Mosey()
+
+    if ignore_filename is not None:
+        builder.set_ignore_filename(ignore_filename)
+
+    return builder.build()
 
 
 def can_make_symlinks() -> bool:
@@ -299,7 +316,7 @@ def relative_paths(root: Path, ignore_filename: str | None = None) -> list[str]:
     Returns:
         The relative path of every step.
     """
-    walker = Mosey(ignore_filename=ignore_filename)
+    walker = build_walker(ignore_filename)
     return [step.relative_as_posix for step in walker.walk(root)]
 
 

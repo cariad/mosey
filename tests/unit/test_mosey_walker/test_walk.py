@@ -1,4 +1,4 @@
-"""Unit tests for the `Mosey.walk` function."""
+"""Unit tests for the `MoseyWalker.walk` function."""
 
 import errno
 import os
@@ -10,6 +10,7 @@ from pytest import MonkeyPatch, mark, param, raises
 
 from mosey import Mosey
 from tests.file_system_helpers import (
+    build_walker,
     make_broken_symlink,
     make_directory,
     make_file,
@@ -18,6 +19,7 @@ from tests.file_system_helpers import (
     make_symlink_to_file,
     make_tree,
     relative_paths,
+    write_ignore_files,
 )
 from tests.markers import (
     needs_posix_permissions,
@@ -38,13 +40,13 @@ def test_root_does_not_exist(tmp_path: Path, make: Callable[[Path], None]) -> No
     make(root)
 
     with raises(FileNotFoundError):
-        Mosey().walk(root)
+        Mosey().build().walk(root)
 
 
 def test_root_is_empty() -> None:
     """`FileNotFoundError` is raised when the root is an empty string."""
     with raises(FileNotFoundError) as raised:
-        Mosey().walk("")
+        Mosey().build().walk("")
 
     assert raised.value.errno == errno.ENOENT
     assert raised.value.filename == ""
@@ -57,7 +59,7 @@ def test_root_is_beneath_a_file(tmp_path: Path) -> None:
     root = parent / "root"
 
     with raises(FileNotFoundError) as raised:
-        Mosey().walk(root)
+        Mosey().build().walk(root)
 
     assert raised.value.errno == errno.ENOENT
     assert raised.value.filename == os.fspath(root)
@@ -73,7 +75,7 @@ def test_root_is_beneath_a_file__cause(tmp_path: Path) -> None:
     make_file(parent)
 
     with raises(FileNotFoundError) as raised:
-        Mosey().walk(parent / "root")
+        Mosey().build().walk(parent / "root")
 
     assert isinstance(raised.value.__cause__, NotADirectoryError)
 
@@ -91,7 +93,7 @@ def test_root_is_not_a_directory(tmp_path: Path, make: Callable[[Path], None]) -
     make(root)
 
     with raises(NotADirectoryError) as raised:
-        Mosey().walk(root)
+        Mosey().build().walk(root)
 
     assert raised.value.errno == errno.ENOTDIR
     assert raised.value.filename == os.fspath(root)
@@ -107,7 +109,7 @@ def test_root_is_not_a_directory__trailing_separator(tmp_path: Path) -> None:
     # a file, which `walk` normalises to `FileNotFoundError`. Passing a string proves
     # that `walk` strips the separator before it can be confused by that.
     with raises(NotADirectoryError) as raised:
-        Mosey().walk(os.fspath(root) + os.sep)
+        Mosey().build().walk(os.fspath(root) + os.sep)
 
     assert raised.value.errno == errno.ENOTDIR
     assert raised.value.filename == os.fspath(root)
@@ -120,7 +122,7 @@ def test_root_is_a_symlink_loop(tmp_path: Path) -> None:
     root.symlink_to(root)
 
     with raises(OSError) as raised:
-        Mosey().walk(root)
+        Mosey().build().walk(root)
 
     # Exactly `OSError`, and not a subclass like `FileNotFoundError`: something exists
     # at the path, but it can't be resolved.
@@ -145,7 +147,7 @@ def test_root_stat_is_denied(tmp_path: Path) -> None:
             os.stat(root)
 
         with raises(PermissionError):
-            Mosey().walk(root)
+            Mosey().build().walk(root)
     finally:
         # Restore access so pytest can clean up `tmp_path`.
         parent.chmod(0o700)
@@ -166,7 +168,7 @@ def test_root_preflight_is_denied(tmp_path: Path) -> None:
         os.stat(root)
 
         with raises(PermissionError):
-            Mosey().walk(root)
+            Mosey().build().walk(root)
     finally:
         # Restore access so pytest can clean up `tmp_path`.
         root.chmod(0o700)
@@ -185,7 +187,7 @@ def test_root_search_is_denied(tmp_path: Path) -> None:
     try:
         # `walk` doesn't check up front that the root can be searched, so the root's
         # files are yielded...
-        steps = Mosey().walk(root)
+        steps = Mosey().build().walk(root)
         assert next(steps).relative_as_posix == "a.txt"
 
         # ...and the error comes when the walk tries to enter a subdirectory.
@@ -254,7 +256,7 @@ def test_walk__steps(tmp_path: Path, make: Callable[[Path], None]) -> None:
     make(root)
     make_tree(root, "a/b.txt")
 
-    [step] = Mosey().walk(root)
+    [step] = Mosey().build().walk(root)
 
     assert step.name == "b.txt"
     assert step.relative_as_posix == "a/b.txt"
@@ -270,7 +272,7 @@ def test_walk__relative_root(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     make_tree(tmp_path, "a/b.txt")
     monkeypatch.chdir(tmp_path)
 
-    [step] = Mosey().walk(".")
+    [step] = Mosey().build().walk(".")
 
     assert step.relative_as_posix == "a/b.txt"
     assert step.root == Path(".")
@@ -312,7 +314,7 @@ def test_walk__symlink_to_directory(tmp_path: Path) -> None:
 
 def test_walk__lazy_root(tmp_path: Path) -> None:
     """The root isn't listed until the first step is requested."""
-    steps = Mosey().walk(tmp_path)
+    steps = Mosey().build().walk(tmp_path)
     make_file(tmp_path / "a")
 
     assert [step.relative_as_posix for step in steps] == ["a"]
@@ -321,7 +323,7 @@ def test_walk__lazy_root(tmp_path: Path) -> None:
 def test_walk__lazy_directories(tmp_path: Path) -> None:
     """A directory isn't listed until the walk reaches it."""
     make_tree(tmp_path, "a/x", "b/")
-    steps = Mosey().walk(tmp_path)
+    steps = Mosey().build().walk(tmp_path)
 
     assert next(steps).relative_as_posix == "a/x"
 
@@ -332,10 +334,33 @@ def test_walk__lazy_directories(tmp_path: Path) -> None:
     assert [step.relative_as_posix for step in steps] == ["b/y"]
 
 
+def test_walk__interleaved(tmp_path: Path) -> None:
+    """One walker takes two walks at the same time, and each yields its own files."""
+    # Both trees hold the same names, but their ignore-files ignore different ones, so a
+    # walk that saw the other walk's rules would yield different files.
+    make_tree(tmp_path, "one/a", "one/b/a", "one/b/x", "one/x")
+    make_tree(tmp_path, "two/a", "two/b/a", "two/b/x", "two/x")
+    write_ignore_files(tmp_path, {"one": ["x"], "two": ["a"]})
+    walker = build_walker("ignore")
+
+    one = walker.walk(tmp_path / "one")
+    two = walker.walk(tmp_path / "two")
+
+    # Each walk keeps its own place and its own rules, however the other one moves.
+    assert next(one).relative_as_posix == "a"
+    assert next(two).relative_as_posix == "b/x"
+    assert next(one).relative_as_posix == "b/a"
+    assert next(two).relative_as_posix == "ignore"
+    assert next(one).relative_as_posix == "ignore"
+    assert next(two).relative_as_posix == "x"
+    assert next(one, None) is None
+    assert next(two, None) is None
+
+
 def test_walk__directory_vanishes(tmp_path: Path) -> None:
     """`FileNotFoundError` is raised when the walk reaches a directory that's gone."""
     make_tree(tmp_path, "a/x", "b/")
-    steps = Mosey().walk(tmp_path)
+    steps = Mosey().build().walk(tmp_path)
 
     assert next(steps).relative_as_posix == "a/x"
 
@@ -360,7 +385,7 @@ def test_walk__directory_listing_is_denied(tmp_path: Path) -> None:
     denied.chmod(0o300)
 
     try:
-        steps = Mosey().walk(tmp_path)
+        steps = Mosey().build().walk(tmp_path)
 
         assert next(steps).relative_as_posix == "a.txt"
 

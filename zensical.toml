@@ -7,6 +7,7 @@ nav = [
   { "Unsupported configurations" = "unsupported.md" },
   { "API reference" = [
     { "Mosey" = "api/mosey.md" },
+    { "Walker" = "api/walker.md" },
     { "Step" = "api/step.md" },
   ] },
 ]
