@@ -48,6 +48,7 @@ build/
 - The nearest ignore-file with a matching line decides, and, within it, the last matching line wins.
 - A line starting with `!` re-includes what it matches.
 - Mosey never walks into an ignored directory, so nothing inside it is yielded or read, and nothing inside it can be re-included.
+- [Default and overriding patterns](default-and-overriding-patterns.md), which your program adds, can be overruled by the ignore-files, or can overrule them.
 
 ## Example
 

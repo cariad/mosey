@@ -17,8 +17,8 @@ from tests.file_system_helpers import (
     make_broken_symlink,
     make_symlink_to_file,
     make_tree,
+    make_tree_with_ignore_files,
     relative_paths,
-    skip_if_windows_cannot_create,
     skip_if_windows_git_warns,
     symlink_target,
     write_ignore_files,
@@ -74,10 +74,7 @@ def build(root: Path, case: IgnoreCase) -> None:
         root: Path to the directory to build them in.
         case: The case to build.
     """
-    skip_if_windows_cannot_create([*case.ignore_files, *case.tree])
-
-    write_ignore_files(root, case.ignore_files)
-    make_tree(root, *case.tree)
+    make_tree_with_ignore_files(root, case.ignore_files, case.tree)
 
 
 PRECEDENCE = [

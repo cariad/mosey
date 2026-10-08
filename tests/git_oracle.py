@@ -11,10 +11,12 @@ import atexit
 import os
 import re
 import subprocess
+from collections.abc import Sequence
 from functools import cache
+from operator import itemgetter
 from pathlib import Path
 from shutil import rmtree
-from tempfile import mkdtemp
+from tempfile import mkdtemp, mkstemp
 from typing import Final
 
 MINIMUM_VERSION: Final[tuple[int, int]] = (2, 32)
@@ -34,6 +36,13 @@ ONE_BYTE = 'Git\'s "?" and "[...]" match one byte, and Mosey\'s match one charac
 
 ESCAPED_SLASH = 'Git\'s "**" before an escaped "/" stands for at least one directory'
 """Why Git matches a "**" before an escaped "/" differently."""
+
+KEPT_SPACES = "Git keeps the spaces at the end of an --exclude pattern"
+"""Why Git matches a pattern weighing 1 or more, with spaces at its end, differently.
+
+Mosey removes spaces from the end of a pattern given in code, as it does from a line of
+an ignore-file.
+"""
 
 
 def git_environment() -> dict[str, str]:
@@ -63,10 +72,22 @@ def git_environment() -> dict[str, str]:
     return environment
 
 
-def git_list_files(root: Path, ignore_filename: str) -> list[str]:
+def git_list_files(
+    root: Path,
+    ignore_filename: str | None,
+    patterns: Sequence[tuple[str, int]] = (),
+) -> list[str]:
     """Return the files beneath a directory that Git doesn't ignore.
 
-    Git reads the ignore-file in `root` and in every directory beneath it.
+    With an ignore-file name, Git reads the ignore-file in `root` and in every directory
+    beneath it.
+
+    Git takes patterns in two places besides ignore-files. Patterns given with
+    `--exclude` overrule every ignore-file, and patterns read from an `--exclude-from`
+    file are overruled by every ignore-file. In both, the last pattern that matches
+    wins, as in an ignore-file, and both tie their patterns to the root. So the patterns
+    are sorted by weight, then those weighing 1 or more are given with `--exclude`, and
+    the rest are written to a file for `--exclude-from`.
 
     Each path is relative to `root` and uses "/" as its separator on every operating
     system, like `Step.relative_as_posix`. Git lists them in ascending byte order, which
@@ -74,7 +95,9 @@ def git_list_files(root: Path, ignore_filename: str) -> list[str]:
 
     Args:
         root: Path to the directory to list.
-        ignore_filename: Name of the ignore-file to read in each directory.
+        ignore_filename: Name of the ignore-file to read in each directory, or `None` to
+            read none.
+        patterns: Each pattern and its weight, in the order they were added.
 
     Returns:
         The relative path of every file that Git doesn't ignore, in Git's order.
@@ -97,17 +120,45 @@ def git_list_files(root: Path, ignore_filename: str) -> list[str]:
                 path = os.path.join(directory, name)
                 raise ValueError(f"Can't compare a tree holding {path!r} with Git")
 
-    # The repository is empty and outside the tree, so every file in the tree is one of
-    # the "others" that it doesn't track.
-    output = run_git(
-        f"--git-dir={git_repository()}",
-        "--work-tree=.",
-        "ls-files",
-        "--others",
-        f"--exclude-per-directory={ignore_filename}",
-        "-z",
-        cwd=root,
-    )
+    arguments: list[str] = []
+
+    if ignore_filename is not None:
+        arguments.append(f"--exclude-per-directory={ignore_filename}")
+
+    # Patterns of equal weight stay in the order they were added in, since `sorted` is
+    # stable.
+    ordered = sorted(patterns, key=itemgetter(1))
+    heavy = [pattern for pattern, weight in ordered if weight > 0]
+    light = [pattern for pattern, weight in ordered if weight <= 0]
+    arguments.extend(f"--exclude={pattern}" for pattern in heavy)
+
+    path = None
+
+    if light:
+        descriptor, path = mkstemp(dir=git_workspace())
+
+        with os.fdopen(descriptor, "wb") as file:
+            file.write(b"".join(os.fsencode(pattern) + b"\n" for pattern in light))
+
+        arguments.append(f"--exclude-from={path}")
+
+    try:
+        # The repository is empty and outside the tree, so every file in the tree is one
+        # of the "others" that it doesn't track.
+        output = run_git(
+            f"--git-dir={git_repository()}",
+            "--work-tree=.",
+            "ls-files",
+            "--others",
+            *arguments,
+            "-z",
+            cwd=root,
+        )
+
+    finally:
+        # Git reads the file before it lists anything, so it can go now.
+        if path is not None:
+            os.remove(path)
 
     # `-z` gives every name exactly, rather than quoting unusual ones, and ends each one
     # with a zero byte. So the last item after splitting is empty.

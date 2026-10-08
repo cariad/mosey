@@ -64,30 +64,38 @@ def list_candidates(directory: str) -> list[Candidate]:
 def read_directory(
     directory: str,
     prefix: str,
+    heavy_layers: Layers,
     layers: Layers,
-    ignore_filename: str,
+    ignore_filename: str | None,
 ) -> tuple[list[Candidate], Layers]:
     """Return a directory's candidates that aren't ignored, in walk order.
 
-    The directory's ignore-file is the candidate with exactly the given name, unless
-    it's a directory. A symlink with that name is read through the link. The file's
-    rules go in front of the layers from the directories above, and each candidate is
-    then judged against them all, the ignore-file included. So a directory's own
-    ignore-file judges everything inside it, but never the directory itself, which only
-    the ignore-files above it can judge.
+    With an ignore-file name, the directory's ignore-file is the candidate with exactly
+    that name, unless it's a directory. A symlink with that name is read through the
+    link. The file's rules go in front of the layers from the directories above, and
+    each candidate is then judged against them all, the ignore-file included. So a
+    directory's own ignore-file judges everything inside it, but never the directory
+    itself, which only the ignore-files above it and the patterns given in code can
+    judge.
+
+    The heavy layers judge each candidate before any of the others, so they overrule
+    every ignore-file.
 
     Args:
         directory: Path to the directory to read.
         prefix: The directory's path relative to the walk's root, with a "/" after each
             name: "" for the root, or "a/b/" for "root/a/b".
+        heavy_layers: The layers for the patterns given in code that overrule every
+            ignore-file.
         layers: The layers from the ignore-files in every directory above this one,
-            deepest first.
-        ignore_filename: The ignore-file's name.
+            deepest first, then the layers for the patterns given in code that every
+            ignore-file overrules.
+        ignore_filename: The ignore-file's name, or `None` to read none.
 
     Returns:
         The candidates that aren't ignored, in walk order, and the layers for the
         directory's subdirectories: this directory's own, if its ignore-file has any
-        rules, then those from the directories above.
+        rules, then `layers`. The heavy layers are never among them.
 
     Raises:
         OSError: When the directory can't be listed, the type of an object within it
@@ -106,7 +114,7 @@ def read_directory(
     # NOTE: 280-450 with 10 candidates, so a search only wins above about 50-100. Walks
     # NOTE: of two trees of mostly small directories, with the name set but absent, took
     # NOTE: 0.4-1.9% longer with a search on Python 3.11 to 3.14 on arm64 macOS.
-    if (ignore_filename, False) in candidates:
+    if ignore_filename is not None and (ignore_filename, False) in candidates:
         path = os.path.join(directory, ignore_filename)
         rules = compile_rules(split_ignore_file(read_ignore_file(path)))
 
@@ -114,11 +122,21 @@ def read_directory(
         if rules is not None:
             layers = ((prefix, *rules), *layers)
 
-    if layers:
+    # The heavy layers go in front of every ignore-file's, but only for judging. They're
+    # never returned with the other layers, so a subdirectory's ignore-file still goes
+    # in front of the layers from the directories above, and behind the heavy layers.
+    #
+    # NOTE: Adding the heavy layers here, once per directory, judged a walk as fast as
+    # NOTE: passing them to `is_ignored` separately, or keeping them in front of the
+    # NOTE: returned layers and adding each ignore-file's behind them: within 0.6% on
+    # NOTE: Python 3.11 and 3.14 on arm64 macOS.
+    judging = heavy_layers + layers
+
+    if judging:
         candidates = [
             (name, is_dir)
             for name, is_dir in candidates
-            if not is_ignored(layers, name, prefix + name, is_dir)
+            if not is_ignored(judging, name, prefix + name, is_dir)
         ]
 
     return candidates, layers

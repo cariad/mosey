@@ -1,4 +1,4 @@
-"""Unit tests for the `patterns` module."""
+"""Unit tests for the `parse_pattern` function."""
 
 from pathlib import Path
 from typing import NamedTuple

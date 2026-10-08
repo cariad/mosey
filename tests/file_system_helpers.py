@@ -2,7 +2,7 @@
 
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -13,11 +13,15 @@ from mosey.patterns import Pattern
 from tests.git_oracle import git_list_files
 
 
-def build_walker(ignore_filename: str | None = None) -> Walker:
+def build_walker(
+    ignore_filename: str | None = None,
+    patterns: Sequence[tuple[str, int]] = (),
+) -> Walker:
     """Build a walker with the public builder.
 
     Args:
         ignore_filename: The name of the ignore-files to read, or `None` to read none.
+        patterns: Each pattern to add, and its weight, in the order to add them.
 
     Returns:
         The walker.
@@ -26,6 +30,9 @@ def build_walker(ignore_filename: str | None = None) -> Walker:
 
     if ignore_filename is not None:
         builder.set_ignore_filename(ignore_filename)
+
+    for pattern, weight in patterns:
+        builder.add_pattern(pattern, weight=weight)
 
     return builder.build()
 
@@ -306,17 +313,43 @@ def make_tree(root: Path, *paths: str) -> None:
             make_file(target)
 
 
-def relative_paths(root: Path, ignore_filename: str | None = None) -> list[str]:
+def make_tree_with_ignore_files(
+    root: Path,
+    ignore_files: Mapping[str, list[str] | bytes],
+    tree: list[str],
+) -> None:
+    """Create ignore-files, named "ignore", and a tree of files and directories.
+
+    The test is skipped on Windows if Windows can't create any of the paths exactly.
+
+    Args:
+        root: Path to the directory to create them in.
+        ignore_files: Lines to write, or the file's exact bytes, by directory, as
+            `write_ignore_files` takes them.
+        tree: Files and directories to create, as `make_tree` takes them.
+    """
+    skip_if_windows_cannot_create([*ignore_files, *tree])
+
+    write_ignore_files(root, ignore_files)
+    make_tree(root, *tree)
+
+
+def relative_paths(
+    root: Path,
+    ignore_filename: str | None = None,
+    patterns: Sequence[tuple[str, int]] = (),
+) -> list[str]:
     """Walk a directory and return every step's relative path, in order.
 
     Args:
         root: Path to the directory to walk.
         ignore_filename: The name of the ignore-files to read, or `None` to read none.
+        patterns: Each pattern to add, and its weight, in the order to add them.
 
     Returns:
         The relative path of every step.
     """
-    walker = build_walker(ignore_filename)
+    walker = build_walker(ignore_filename, patterns)
     return [step.relative_as_posix for step in walker.walk(root)]
 
 

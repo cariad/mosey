@@ -2,7 +2,7 @@
 
 import errno
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
@@ -10,7 +10,7 @@ from pytest import mark, param, raises
 
 from mosey.candidate import Candidate
 from mosey.directories import list_candidates, read_directory
-from mosey.rules import Layers
+from mosey.rules import Layers, compile_root_layers
 from tests.file_system_helpers import (
     make_broken_symlink,
     make_fifo,
@@ -56,6 +56,72 @@ class DirectoryCase(NamedTuple):
     """The prefixes of the layers it returns, deepest first."""
 
 
+def git_kept(
+    root: Path,
+    case: DirectoryCase,
+    patterns: Sequence[tuple[str, int]] = (),
+) -> list[str]:
+    """Build a case's tree, and return the candidates in its directory that Git keeps.
+
+    Args:
+        root: Path to the directory to build the tree in.
+        case: The case to build.
+        patterns: Each pattern to give Git, and its weight.
+
+    Returns:
+        The names of the candidates that Git keeps in the case's directory, written as
+        `DirectoryCase.kept` writes them.
+    """
+    # Git shows a directory only through what it keeps inside. So if a case kept
+    # nothing, Git's listing couldn't show that Git entered the directory at all.
+    assert case.kept
+
+    # Every ignore-file is named "ignore". On macOS and Windows, any entry named
+    # "Ignore" would be that same file.
+    names = [name for path in case.tree for name in path.split("/")]
+    assert all(name.lower() != "ignore" for name in names)
+
+    # Each subdirectory gets an ignore-file below, so only the case's directory and the
+    # directories above it can have one of the case's own.
+    assert all(
+        not key or f"{case.directory}/".startswith(f"{key}/")
+        for key in case.ignore_files
+    )
+
+    skip_if_windows_cannot_create(case.tree)
+
+    write_ignore_files(root, case.ignore_files)
+    make_tree(root, *case.tree)
+
+    directory = root / case.directory
+    candidates = list_candidates(os.fspath(directory))
+
+    # Git only shows a directory through a file inside it. So each subdirectory gets an
+    # ignore-file that keeps itself. A directory is never judged by its own ignore-file,
+    # so this can't change whether the subdirectory is kept.
+    #
+    # A pattern weighing 1 or more overrules that line, though, so a case can't give Git
+    # one that matches a subdirectory's "ignore": Git would hide the subdirectory, even
+    # though it's kept.
+    write_ignore_files(
+        directory,
+        {name: ["!/ignore"] for name, is_dir in candidates if is_dir},
+    )
+
+    listed = git_list_files(root, "ignore", patterns)
+    prefix = f"{case.directory}/" if case.directory else ""
+
+    # A file is kept when Git lists it, and a subdirectory when Git lists the
+    # ignore-file inside it.
+    kept = [
+        (name, is_dir)
+        for name, is_dir in candidates
+        if (f"{prefix}{name}/ignore" if is_dir else prefix + name) in listed
+    ]
+
+    return written(kept)
+
+
 def prefixes(layers: Layers) -> list[str]:
     """Return each layer's prefix.
 
@@ -83,15 +149,23 @@ def written(candidates: list[Candidate]) -> list[str]:
     return [f"{name}/" if is_dir else name for name, is_dir in candidates]
 
 
-def read_case(root: Path, case: DirectoryCase) -> tuple[list[str], list[str]]:
+def read_case(
+    root: Path,
+    case: DirectoryCase,
+    heavy_layers: Layers = (),
+    light_layers: Layers = (),
+) -> tuple[list[str], list[str]]:
     """Build a case's tree, and read its directory the way a walk would.
 
-    The root and each directory down to the case's are read in turn, each with the
-    layers that its parent returned.
+    The root and each directory down to the case's are read in turn, each with the heavy
+    layers and the layers that its parent returned. The root is read with the light
+    layers.
 
     Args:
         root: Path to the directory to build the tree in.
         case: The case to build and read.
+        heavy_layers: The layers for the patterns that overrule every ignore-file.
+        light_layers: The layers for the patterns that every ignore-file overrules.
 
     Returns:
         The names of the candidates kept in the case's directory, written as
@@ -102,10 +176,12 @@ def read_case(root: Path, case: DirectoryCase) -> tuple[list[str], list[str]]:
 
     directory = os.fspath(root)
     prefix = ""
-    layers: Layers = ()
+    layers = light_layers
 
     for name in case.directory.split("/") if case.directory else []:
-        candidates, layers = read_directory(directory, prefix, layers, "ignore")
+        candidates, layers = read_directory(
+            directory, prefix, heavy_layers, layers, "ignore"
+        )
 
         # A walk only reads a directory that its parent kept.
         assert (name, True) in candidates
@@ -113,7 +189,9 @@ def read_case(root: Path, case: DirectoryCase) -> tuple[list[str], list[str]]:
         directory = os.path.join(directory, name)
         prefix += f"{name}/"
 
-    candidates, layers = read_directory(directory, prefix, layers, "ignore")
+    candidates, layers = read_directory(
+        directory, prefix, heavy_layers, layers, "ignore"
+    )
     return written(candidates), prefixes(layers)
 
 
@@ -588,50 +666,7 @@ def test_read_directory__order(tmp_path: Path) -> None:
 )
 def test_read_directory__git(tmp_path: Path, case: DirectoryCase) -> None:
     """Git lists each candidate exactly when it's kept."""
-    # Git shows a directory only through what it keeps inside. So if a case kept
-    # nothing, Git's listing couldn't show that Git entered the directory at all.
-    assert case.kept
-
-    # Every ignore-file is named "ignore". On macOS and Windows, any entry named
-    # "Ignore" would be that same file.
-    names = [name for path in case.tree for name in path.split("/")]
-    assert all(name.lower() != "ignore" for name in names)
-
-    # Each subdirectory gets an ignore-file below, so only the case's directory and the
-    # directories above it can have one of the case's own.
-    assert all(
-        not key or f"{case.directory}/".startswith(f"{key}/")
-        for key in case.ignore_files
-    )
-
-    skip_if_windows_cannot_create(case.tree)
-
-    write_ignore_files(tmp_path, case.ignore_files)
-    make_tree(tmp_path, *case.tree)
-
-    directory = tmp_path / case.directory
-    candidates = list_candidates(os.fspath(directory))
-
-    # Git only shows a directory through a file inside it. So each subdirectory gets an
-    # ignore-file that keeps itself. A directory is never judged by its own ignore-file,
-    # so this can't change whether the subdirectory is kept.
-    write_ignore_files(
-        directory,
-        {name: ["!/ignore"] for name, is_dir in candidates if is_dir},
-    )
-
-    listed = git_list_files(tmp_path, "ignore")
-    prefix = f"{case.directory}/" if case.directory else ""
-
-    # A file is kept when Git lists it, and a subdirectory when Git lists the
-    # ignore-file inside it.
-    kept = [
-        (name, is_dir)
-        for name, is_dir in candidates
-        if (f"{prefix}{name}/ignore" if is_dir else prefix + name) in listed
-    ]
-
-    assert written(kept) == case.kept
+    assert git_kept(tmp_path, case) == case.kept
 
 
 @mark.parametrize(
@@ -669,6 +704,146 @@ def test_read_directory__directory_named_like_ignore_file(
     assert read_case(tmp_path, case) == (case.kept, case.prefixes)
 
 
+def test_read_directory__heavy_and_light_layers(tmp_path: Path) -> None:
+    """The heavy layers judge first, then the ignore-files, then the light layers."""
+    case = DirectoryCase(
+        ignore_files={"sub": ["!a.log", "keep.log"]},
+        tree=["sub/a.log", "sub/b.log", "sub/keep.log"],
+        directory="sub",
+        # The light "*.log" drops "b.log", the ignore-file keeps "a.log" over it, and
+        # the heavy "!keep.log" keeps "keep.log" over the ignore-file.
+        kept=["a.log", "ignore", "keep.log"],
+        prefixes=["sub/", ""],
+    )
+
+    heavy_layers = compile_root_layers(["!keep.log"])
+    light_layers = compile_root_layers(["*.log"])
+
+    assert read_case(tmp_path, case, heavy_layers, light_layers) == (
+        case.kept,
+        case.prefixes,
+    )
+
+
+# The heavy layers judge each candidate before any ignore-file does, and are never
+# returned, so the prefixes are only ever the ignore-files'.
+HEAVY = [
+    param(
+        ["*.log"],
+        DirectoryCase(
+            ignore_files={},
+            tree=["sub/a.log", "sub/b"],
+            directory="sub",
+            kept=["b"],
+            prefixes=[],
+        ),
+        id="without-ignore-files",
+    ),
+    param(
+        ["*.log"],
+        DirectoryCase(
+            ignore_files={"": ["!keep.log"]},
+            tree=["a.log", "b", "keep.log"],
+            directory="",
+            kept=["b", "ignore"],
+            prefixes=[""],
+        ),
+        id="ignores-over-own-file",
+    ),
+    param(
+        ["!keep.log"],
+        DirectoryCase(
+            ignore_files={"": ["*.log"]},
+            tree=["a.log", "b", "keep.log"],
+            directory="",
+            kept=["b", "ignore", "keep.log"],
+            prefixes=[""],
+        ),
+        id="re-includes-over-own-file",
+    ),
+    param(
+        ["*.log"],
+        DirectoryCase(
+            ignore_files={"": ["!keep.log"]},
+            tree=["sub/a.log", "sub/b", "sub/keep.log"],
+            directory="sub",
+            kept=["b"],
+            prefixes=[""],
+        ),
+        id="ignores-over-file-above",
+    ),
+    param(
+        ["!keep.log"],
+        DirectoryCase(
+            ignore_files={"": ["*.log"]},
+            tree=["sub/a.log", "sub/b", "sub/keep.log"],
+            directory="sub",
+            kept=["b", "keep.log"],
+            prefixes=[""],
+        ),
+        id="re-includes-over-file-above",
+    ),
+    param(
+        ["*.log"],
+        DirectoryCase(
+            ignore_files={"": ["!keep.log"], "sub": ["!keep.log"]},
+            tree=["sub/a.log", "sub/b", "sub/keep.log"],
+            directory="sub",
+            kept=["b", "ignore"],
+            prefixes=["sub/", ""],
+        ),
+        id="ignores-over-every-file",
+    ),
+    param(
+        ["!build/"],
+        DirectoryCase(
+            ignore_files={"": ["build/"]},
+            tree=["build/x", "src/x"],
+            directory="",
+            kept=["build/", "ignore", "src/"],
+            prefixes=[""],
+        ),
+        id="re-includes-directory",
+    ),
+    # The ignore-file isn't kept, but its lines still judge the other candidates.
+    param(
+        ["ignore"],
+        DirectoryCase(
+            ignore_files={"": ["*.log"]},
+            tree=["a.log", "b"],
+            directory="",
+            kept=["b"],
+            prefixes=[""],
+        ),
+        id="drops-own-file",
+    ),
+]
+
+
+@mark.parametrize(("heavy", "case"), HEAVY)
+def test_read_directory__heavy_layers(
+    tmp_path: Path,
+    heavy: list[str],
+    case: DirectoryCase,
+) -> None:
+    """The heavy layers judge before every ignore-file, and are never returned."""
+    assert read_case(tmp_path, case, heavy_layers=compile_root_layers(heavy)) == (
+        case.kept,
+        case.prefixes,
+    )
+
+
+@needs_git
+@mark.parametrize(("heavy", "case"), HEAVY)
+def test_read_directory__heavy_layers_git(
+    tmp_path: Path,
+    heavy: list[str],
+    case: DirectoryCase,
+) -> None:
+    """Git lists each candidate exactly when it's kept, given the heavy patterns."""
+    assert git_kept(tmp_path, case, [(pattern, 1) for pattern in heavy]) == case.kept
+
+
 @needs_symlinks
 @mark.parametrize(
     ("make", "error"),
@@ -702,7 +877,7 @@ def test_read_directory__ignore_file_cannot_be_read(
     directory = os.fspath(tmp_path)
 
     with raises(error) as raised:
-        read_directory(directory, "", (), "ignore")
+        read_directory(directory, "", (), (), "ignore")
 
     assert raised.value.filename == os.path.join(directory, "ignore")
 
@@ -713,7 +888,7 @@ def test_read_directory__ignore_file_differently_cased(tmp_path: Path) -> None:
     (tmp_path / "Ignore").write_bytes(b"a\n")
 
     # macOS and Windows would open "Ignore" if asked for "ignore", and drop "a".
-    assert read_directory(os.fspath(tmp_path), "", (), "ignore") == (
+    assert read_directory(os.fspath(tmp_path), "", (), (), "ignore") == (
         [("Ignore", False), ("a", False)],
         (),
     )
@@ -746,7 +921,7 @@ def test_read_directory__ignore_file_is_symlink(
     symlink_target(path).write_bytes(data)
     make_tree(tmp_path, "a.log", "b")
 
-    candidates, layers = read_directory(os.fspath(tmp_path), "", (), "ignore")
+    candidates, layers = read_directory(os.fspath(tmp_path), "", (), (), "ignore")
 
     assert candidates == expect
     assert prefixes(layers) == [""]
@@ -765,7 +940,7 @@ def test_read_directory__ignore_file_is_symlink_to_fifo(tmp_path: Path) -> None:
     # than hangs.
     with alarm(1, "Waited for the FIFO to be opened for writing"):
         # The FIFO itself isn't a candidate.
-        assert read_directory(os.fspath(tmp_path), "", (), "ignore") == (
+        assert read_directory(os.fspath(tmp_path), "", (), (), "ignore") == (
             [("a", False), ("ignore", False)],
             (),
         )
@@ -777,10 +952,107 @@ def test_read_directory__ignore_filename(tmp_path: Path) -> None:
     make_tree(tmp_path, "a", "b")
     (tmp_path / "rules").write_bytes(b"a\n")
 
-    candidates, layers = read_directory(os.fspath(tmp_path), "", (), "rules")
+    candidates, layers = read_directory(os.fspath(tmp_path), "", (), (), "rules")
 
     assert candidates == [("b", False), ("rules", False)]
     assert prefixes(layers) == [""]
+
+
+# The light layers judge each candidate after every ignore-file, and stay last in the
+# layers returned, behind any ignore-file's.
+LIGHT = [
+    param(
+        ["*.log"],
+        DirectoryCase(
+            ignore_files={},
+            tree=["sub/a.log", "sub/b"],
+            directory="sub",
+            kept=["b"],
+            prefixes=[""],
+        ),
+        id="without-ignore-files",
+    ),
+    param(
+        ["*.log"],
+        DirectoryCase(
+            ignore_files={"": ["!keep.log"]},
+            tree=["a.log", "b", "keep.log"],
+            directory="",
+            kept=["b", "ignore", "keep.log"],
+            prefixes=["", ""],
+        ),
+        id="own-file-re-includes",
+    ),
+    param(
+        ["!keep.log"],
+        DirectoryCase(
+            ignore_files={"": ["*.log"]},
+            tree=["a.log", "b", "keep.log"],
+            directory="",
+            kept=["b", "ignore"],
+            prefixes=["", ""],
+        ),
+        id="own-file-ignores",
+    ),
+    # The directory's own layer goes in front of the light layer.
+    param(
+        ["*.log"],
+        DirectoryCase(
+            ignore_files={"sub": ["!keep.log"]},
+            tree=["sub/a.log", "sub/b", "sub/keep.log"],
+            directory="sub",
+            kept=["b", "ignore", "keep.log"],
+            prefixes=["sub/", ""],
+        ),
+        id="own-file-in-front",
+    ),
+    param(
+        ["*.log"],
+        DirectoryCase(
+            ignore_files={"": ["!keep.log"]},
+            tree=["sub/a.log", "sub/b", "sub/keep.log"],
+            directory="sub",
+            kept=["b", "keep.log"],
+            prefixes=["", ""],
+        ),
+        id="file-above-re-includes",
+    ),
+    param(
+        ["*.log"],
+        DirectoryCase(
+            ignore_files={"": ["!a.log"], "sub": ["!b.log"]},
+            tree=["sub/a.log", "sub/b.log", "sub/c.log"],
+            directory="sub",
+            kept=["a.log", "b.log", "ignore"],
+            prefixes=["sub/", "", ""],
+        ),
+        id="every-file-re-includes",
+    ),
+]
+
+
+@mark.parametrize(("light", "case"), LIGHT)
+def test_read_directory__light_layers(
+    tmp_path: Path,
+    light: list[str],
+    case: DirectoryCase,
+) -> None:
+    """The light layers judge after every ignore-file, and are returned last."""
+    assert read_case(tmp_path, case, light_layers=compile_root_layers(light)) == (
+        case.kept,
+        case.prefixes,
+    )
+
+
+@needs_git
+@mark.parametrize(("light", "case"), LIGHT)
+def test_read_directory__light_layers_git(
+    tmp_path: Path,
+    light: list[str],
+    case: DirectoryCase,
+) -> None:
+    """Git lists each candidate exactly when it's kept, given the light patterns."""
+    assert git_kept(tmp_path, case, [(pattern, 0) for pattern in light]) == case.kept
 
 
 @mark.parametrize(
@@ -820,9 +1092,29 @@ def test_read_directory__link_to_directory(
     make(tmp_path / "foo")
     write_ignore_files(tmp_path, {"": lines})
 
-    candidates, _ = read_directory(os.fspath(tmp_path), "", (), "ignore")
+    candidates, _ = read_directory(os.fspath(tmp_path), "", (), (), "ignore")
 
     assert candidates == expect
+
+
+def test_read_directory__no_ignore_filename(tmp_path: Path) -> None:
+    """Without an ignore-file name nothing is read, but the layers given still judge."""
+    make_tree(tmp_path, "a.log", "b", "keep.log")
+
+    # Read as an ignore-file, this would drop "b".
+    write_ignore_files(tmp_path, {"": ["b"]})
+
+    heavy_layers = compile_root_layers(["!keep.log"])
+    light_layers = compile_root_layers(["*.log"])
+
+    candidates, layers = read_directory(
+        os.fspath(tmp_path), "", heavy_layers, light_layers, None
+    )
+
+    assert candidates == [("b", False), ("ignore", False), ("keep.log", False)]
+
+    # Returned as they were given, without the heavy layers.
+    assert layers is light_layers
 
 
 @needs_posix_permissions
@@ -837,7 +1129,7 @@ def test_read_directory__read_is_denied(tmp_path: Path) -> None:
 
     try:
         with raises(PermissionError) as raised:
-            read_directory(directory, "", (), "ignore")
+            read_directory(directory, "", (), (), "ignore")
 
         assert raised.value.errno == errno.EACCES
         assert raised.value.filename == os.path.join(directory, "ignore")
@@ -859,7 +1151,7 @@ def test_read_directory__search_is_denied(tmp_path: Path) -> None:
 
     try:
         with raises(PermissionError) as raised:
-            read_directory(directory, "sub/", (), "ignore")
+            read_directory(directory, "sub/", (), (), "ignore")
 
         assert raised.value.errno == errno.EACCES
         assert raised.value.filename == os.path.join(directory, "ignore")
@@ -874,7 +1166,7 @@ def test_read_directory__search_is_denied_without_ignore_file(tmp_path: Path) ->
     make_tree(tmp_path, "sub/a", "sub/b/", "sub/c.log", "sub/d/")
     write_ignore_files(tmp_path, {"": ["*.log", "b/"]})
     path = tmp_path / "sub"
-    _, layers = read_directory(os.fspath(tmp_path), "", (), "ignore")
+    _, layers = read_directory(os.fspath(tmp_path), "", (), (), "ignore")
 
     # Read and write but not search ("execute"), so nothing inside the directory can be
     # looked up by its path. Opening the ignore-file would raise, and looking up "b"
@@ -882,7 +1174,9 @@ def test_read_directory__search_is_denied_without_ignore_file(tmp_path: Path) ->
     path.chmod(0o600)
 
     try:
-        candidates, layers = read_directory(os.fspath(path), "sub/", layers, "ignore")
+        candidates, layers = read_directory(
+            os.fspath(path), "sub/", (), layers, "ignore"
+        )
 
         assert candidates == [("a", False), ("d", True)]
         assert prefixes(layers) == [""]
