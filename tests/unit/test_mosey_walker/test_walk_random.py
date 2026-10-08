@@ -1,12 +1,13 @@
 """Unit tests that compare the `MoseyWalker.walk` function with Git on random trees."""
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from pytest import fail
 
 from tests.file_system_helpers import relative_paths, symlinks_allowed
-from tests.git_oracle import git_list_files
+from tests.git_oracle import git_list_files, git_repository
 from tests.markers import needs_git
 from tests.random_trees import RandomTree, build, random_tree
 
@@ -20,6 +21,16 @@ options, which a failure prints as a call to `random_tree`.
 
 TREES = 300
 """How many random trees to compare."""
+
+PATTERNS_SEED = f"{SEED}/patterns"
+"""The seed that every random tree with patterns is made from, along with its index.
+
+Like `SEED`, each operating system and version of Python has its own. It differs from
+`SEED`, so the trees with patterns aren't the trees without them.
+"""
+
+TREES_WITH_PATTERNS = 100
+"""How many random trees with patterns to compare."""
 
 
 def describe(made: str, case: RandomTree, listed: list[str], walked: list[str]) -> str:
@@ -66,6 +77,7 @@ def test_walk__random_trees(tmp_path: Path) -> None:
             index,
             symlinks=symlinks,
             ignore_directories=ignore_directories,
+            patterns=False,
         )
         for index in range(TREES)
     ]
@@ -85,7 +97,7 @@ def test_walk__random_trees(tmp_path: Path) -> None:
     for index, case in enumerate(cases):
         made = (
             f"random_tree({SEED!r}, {index}, symlinks={symlinks}, "
-            f"ignore_directories={ignore_directories})"
+            f"ignore_directories={ignore_directories}, patterns=False)"
         )
 
         root = tmp_path / str(index)
@@ -93,6 +105,64 @@ def test_walk__random_trees(tmp_path: Path) -> None:
 
         try:
             walked = relative_paths(root, "ignore")
+        except Exception as error:
+            error.add_note(f"{made} made this tree:\n{case!r}")
+            raise
+
+        if walked != listed:
+            fail(describe(made, case, listed, walked), pytrace=False)
+
+
+@needs_git
+def test_walk__random_trees_with_patterns(tmp_path: Path) -> None:
+    """Git lists exactly what the walk yields, in every random tree with patterns."""
+    # Symlinks, and directories named like the ignore-file, as in
+    # `test_walk__random_trees` and for the same reasons.
+    symlinks = symlinks_allowed()
+    ignore_directories = sys.platform != "win32"
+
+    cases = [
+        random_tree(
+            PATTERNS_SEED,
+            index,
+            symlinks=symlinks,
+            ignore_directories=ignore_directories,
+            patterns=True,
+        )
+        for index in range(TREES_WITH_PATTERNS)
+    ]
+
+    for index, case in enumerate(cases):
+        build(tmp_path / str(index), case)
+
+    # The patterns are tied to the directory that Git lists, so one listing of every
+    # tree, as in `test_walk__random_trees`, would tie them to the wrong directory. So
+    # each tree gets a run of Git of its own, and the runs are independent, so they run
+    # at the same time. The repository is made first, so they never race to make it.
+    git_repository()
+
+    with ThreadPoolExecutor() as executor:
+        listings = [
+            executor.submit(
+                git_list_files,
+                tmp_path / str(index),
+                case.ignore_filename,
+                case.patterns,
+            )
+            for index, case in enumerate(cases)
+        ]
+
+    for index, (case, listing) in enumerate(zip(cases, listings, strict=True)):
+        made = (
+            f"random_tree({PATTERNS_SEED!r}, {index}, symlinks={symlinks}, "
+            f"ignore_directories={ignore_directories}, patterns=True)"
+        )
+
+        root = tmp_path / str(index)
+
+        try:
+            listed = listing.result()
+            walked = relative_paths(root, case.ignore_filename, case.patterns)
         except Exception as error:
             error.add_note(f"{made} made this tree:\n{case!r}")
             raise

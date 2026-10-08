@@ -4,6 +4,7 @@ nav = [
   { "Get started" = "index.md" },
   { "Walk order" = "walk-order.md" },
   { "Ignore-files" = "ignore-files.md" },
+  { "Default and overriding patterns" = "default-and-overriding-patterns.md" },
   { "Unsupported configurations" = "unsupported.md" },
   { "API reference" = [
     { "Mosey" = "api/mosey.md" },

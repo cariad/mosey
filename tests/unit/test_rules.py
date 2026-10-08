@@ -5,7 +5,7 @@ from typing import NamedTuple
 
 from pytest import mark, param
 
-from mosey.rules import Layer, Layers, compile_rules, is_ignored
+from mosey.rules import Layer, Layers, compile_root_layers, compile_rules, is_ignored
 from tests.file_system_helpers import (
     make_tree,
     skip_if_windows_cannot_create,
@@ -543,11 +543,50 @@ def test_is_ignored__malformed(case: RuleCase) -> None:
     assert judge(case) == case.ignored
 
 
+# Every case whose only ignore-file is in the root, so its lines could be patterns given
+# in code instead.
+IN_ROOT = [
+    case
+    for case in [
+        *PRECEDENCE,
+        *NEGATION,
+        *DIRECTORY_ONLY,
+        *ANCHORING,
+        *UNANCHORED,
+        *DOUBLE_ASTERISKS,
+        *NEVER_MATCHES,
+        *MALFORMED,
+    ]
+    if isinstance(case.values[0], RuleCase) and set(case.values[0].files) == {""}
+]
+
+
+@mark.parametrize("case", IN_ROOT)
+def test_compile_root_layers(case: RuleCase) -> None:
+    """Patterns judge an entry exactly as the same lines in the root's ignore-file."""
+    found = compile_root_layers(case.files[""])
+
+    # One layer, tied to the root, unless no line is left to match.
+    assert [prefix for prefix, _, _ in found] == [
+        prefix for prefix, _, _ in layers(case)
+    ]
+
+    relative = case.entry.removesuffix("/")
+    name = relative.rpartition("/")[2]
+    assert is_ignored(found, name, relative, case.entry.endswith("/")) == case.ignored
+
+
 NOTHING_LEFT = [
     param([], id="no-lines"),
     param(["!", "/", "!/", "//"], id="lines-with-nothing-left"),
     param(["[a", "[[:foo:]]", "a\\"], id="malformed-lines"),
 ]
+
+
+@mark.parametrize("lines", NOTHING_LEFT)
+def test_compile_root_layers__nothing_left(lines: list[str]) -> None:
+    """No layers are returned when no line is left to match."""
+    assert compile_root_layers(lines) == ()
 
 
 @mark.parametrize("lines", NOTHING_LEFT)

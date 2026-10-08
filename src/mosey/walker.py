@@ -28,11 +28,14 @@ class Walker(Protocol):
         Files are yielded in a deterministic walk order, documented at
         https://cariad.github.io/mosey/walk-order/.
 
-        When the walker has an ignore-file name (set by
-        [`Mosey.set_ignore_filename`][mosey.Mosey.set_ignore_filename]), each
-        directory's [ignore-file][ignore-files] is read when the walk reaches the
-        directory, and the files and directories its patterns ignore aren't yielded or
-        walked, along with everything inside them.
+        The files and directories that the walker's patterns ignore aren't yielded or
+        walked, nor are the files and directories within them.
+
+        Its patterns are the ones added by
+        [`Mosey.add_pattern`][mosey.Mosey.add_pattern], and, when it has an ignore-file
+        name (set by [`Mosey.set_ignore_filename`][mosey.Mosey.set_ignore_filename]),
+        those in each directory's [ignore-file][ignore-files], which is read when the
+        walk reaches the directory.
 
         A relative root is found from the working directory each time a subdirectory is
         read, so don't change the working directory during a walk.

@@ -15,6 +15,7 @@ from typing import Final, final
 from .directories import list_candidates, read_directory
 from .exceptions import raise_file_not_found
 from .mosey_step import MoseyStep
+from .rules import Layers
 from .step import Step
 
 
@@ -26,22 +27,53 @@ class MoseyWalker:
     wherever `Mosey.build` returns one.
     """
 
-    __slots__ = ("_ignore_filename",)
+    __slots__ = (
+        "_heavy_layers",
+        "_ignore_filename",
+        "_judges",
+        "_light_layers",
+    )
+
+    _heavy_layers: Final[Layers]
+    """The layers for the patterns given in code that overrule every ignore-file."""
 
     _ignore_filename: Final[str | None]
     """Filename of the ignore-files to read, or `None` to read none."""
 
-    def __init__(self, *, ignore_filename: str | None) -> None:
+    _judges: Final[bool]
+    """Whether the walk judges any entries: `True` if it reads ignore-files or has any
+    patterns given in code."""
+
+    _light_layers: Final[Layers]
+    """The layers for the patterns given in code that every ignore-file overrules."""
+
+    def __init__(
+        self,
+        *,
+        heavy_layers: Layers,
+        ignore_filename: str | None,
+        light_layers: Layers,
+    ) -> None:
         """Initialise a `MoseyWalker`.
 
         Arguments are trusted implicitly, and so this initialiser isn't intended to be
         called outside of the `mosey` package. `Mosey.build` checks them first.
 
         Args:
+            heavy_layers: The layers for the patterns given in code that overrule every
+                ignore-file.
             ignore_filename: Filename of the ignore-files to read, or `None` to read
                 none.
+            light_layers: The layers for the patterns given in code that every
+                ignore-file overrules.
         """
+        self._heavy_layers = heavy_layers
         self._ignore_filename = ignore_filename
+        self._light_layers = light_layers
+
+        self._judges = (
+            ignore_filename is not None or bool(heavy_layers) or bool(light_layers)
+        )
 
     def _iterate(self, root: Path) -> Iterator[Step]:
         """Walk a directory and yield a `Step` for every file that isn't ignored.
@@ -71,8 +103,8 @@ class MoseyWalker:
         #    iterator rather than the list itself, so that the `for` loop below resumes
         #    where it left off instead of starting the list again.
         #  - The layers from the ignore-files in the directory and every directory above
-        #    it, deepest first, for reading its subdirectories. They're always empty
-        #    when there's no ignore-file name.
+        #    it, deepest first, then the light layers, for reading its subdirectories.
+        #    They're always empty when the walk judges nothing.
         #
         # A relative root is resolved against the working directory each time a
         # directory is listed, so changing the working directory partway through a walk
@@ -81,20 +113,24 @@ class MoseyWalker:
         # anyway. `os.walk` behaves the same way.
         root_str = os.fspath(root)
 
-        # NOTE: We check for an ignore-file name here and for every subdirectory below,
-        # NOTE: rather than keep a second copy of the loop for walks without a name. On
-        # NOTE: Python 3.11 to 3.14 on arm64 macOS, a walk with no name took 0-0.6%
-        # NOTE: longer than before ignore-files, and a walk with a name that no file in
-        # NOTE: the tree has took 0.6-1.4% longer.
-        if self._ignore_filename is None:
-            root_candidates, root_layers = list_candidates(root_str), ()
-        else:
+        # NOTE: We check whether the walk judges anything here and for every
+        # NOTE: subdirectory below, rather than keep a second copy of the loop for walks
+        # NOTE: that don't. On Python 3.11 to 3.14 on arm64 macOS, a walk with no name
+        # NOTE: or patterns took 0-0.6% longer than before ignore-files, and a walk with
+        # NOTE: a name that no file in the tree has took 0.6-1.4% longer. Adding
+        # NOTE: default and overriding patterns changed neither: within 0.2%.
+        if self._judges:
+            # The light layers start the walk's layers, so each ignore-file's layer goes
+            # in front of them, and every ignore-file overrules them.
             root_candidates, root_layers = read_directory(
                 root_str,
                 "",
-                (),
+                self._heavy_layers,
+                self._light_layers,
                 self._ignore_filename,
             )
+        else:
+            root_candidates, root_layers = list_candidates(root_str), ()
 
         stack = [(root_str, "", iter(root_candidates), root_layers)]
 
@@ -112,14 +148,18 @@ class MoseyWalker:
                     path = os.path.join(directory, name)
                     path_prefix = prefix + name + "/"
 
-                    # Without an ignore-file name, the subdirectory is listed exactly as
-                    # it would be if ignore-files didn't exist.
-                    if self._ignore_filename is None:
-                        path_candidates, path_layers = list_candidates(path), layers
-                    else:
+                    # When the walk judges nothing, the subdirectory is listed exactly
+                    # as it would be if ignore-files and patterns didn't exist.
+                    if self._judges:
                         path_candidates, path_layers = read_directory(
-                            path, path_prefix, layers, self._ignore_filename
+                            path,
+                            path_prefix,
+                            self._heavy_layers,
+                            layers,
+                            self._ignore_filename,
                         )
+                    else:
+                        path_candidates, path_layers = list_candidates(path), layers
 
                     # Add this subdirectory to the stack...
                     stack.append(

@@ -4,9 +4,12 @@
 module.
 """
 
+from operator import itemgetter
 from typing import final
 
 from .mosey_walker import MoseyWalker
+from .patterns import check_pattern
+from .rules import compile_root_layers
 from .walker import Walker
 
 
@@ -20,6 +23,7 @@ class Mosey:
     ```python
     builder = Mosey()
     builder.set_ignore_filename(".walkignore")
+    builder.add_pattern("*.pdf")
     walker = builder.build()
 
     for step in walker.walk("."):
@@ -32,14 +36,53 @@ class Mosey:
     Describe the walk on one thread, then share the walker rather than the `Mosey`.
     """
 
-    __slots__ = ("_ignore_filename",)
+    __slots__ = (
+        "_ignore_filename",
+        "_patterns",
+    )
 
     _ignore_filename: str | None
     """Filename of the ignore-files to read, or `None` to read none."""
 
+    _patterns: tuple[tuple[int, str], ...]
+    """Each pattern given in code, after its weight, in the order they were added.
+
+    A tuple rather than a list, so that a copy of a `Mosey` never shares it.
+    """
+
     def __init__(self) -> None:
-        """Initialise a `Mosey` describing a walk that reads no ignore-files."""
+        """Initialise a `Mosey` describing a walk with no ignore-files or patterns."""
         self._ignore_filename = None
+        self._patterns = ()
+
+    def add_pattern(
+        self,
+        pattern: str,
+        *,
+        weight: int = 0,
+    ) -> None:
+        """Add a pattern that the walk judges files and directories by.
+
+        Write the pattern exactly like a line of an [ignore-file][ignore-files] in the
+        directory you walk. The walk doesn't yield or walk the files and directories
+        that the pattern ignores, whether or not the walk reads ignore-files.
+
+        The pattern's weight says whether the ignore-files can overrule it, as
+        documented at
+        [default and overriding patterns][default-and-overriding-patterns].
+
+        Args:
+            pattern: The pattern. For example, `*.pdf`.
+            weight: The pattern's weight, which decides whether the ignore-files can
+                overrule it.
+
+        Raises:
+            ValueError: When an ignore-file would read `pattern` differently, it's
+                broken, or it holds a backslash that escapes nothing, as listed at
+                [default and overriding patterns][default-and-overriding-patterns].
+        """
+        check_pattern(pattern)
+        self._patterns = (*self._patterns, (weight, pattern))
 
     def set_ignore_filename(self, name: str) -> None:
         """Set the filename of the ignore-files that the walk reads.
@@ -75,4 +118,15 @@ class Mosey:
         Returns:
             A new [`Walker`][mosey.Walker].
         """
-        return MoseyWalker(ignore_filename=self._ignore_filename)
+        # Patterns of equal weight stay in the order they were added in, since `sorted`
+        # is stable, so the last one added that matches still decides.
+        patterns = sorted(self._patterns, key=itemgetter(0))
+
+        # In that order, the last matching rule wins, and the ignore-files rank above
+        # every pattern weighing 0 and below every pattern weighing 1. So the heavy
+        # patterns judge before the ignore-files, and the light ones after.
+        return MoseyWalker(
+            heavy_layers=compile_root_layers([p for w, p in patterns if w > 0]),
+            ignore_filename=self._ignore_filename,
+            light_layers=compile_root_layers([p for w, p in patterns if w <= 0]),
+        )

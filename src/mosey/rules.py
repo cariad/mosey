@@ -71,19 +71,21 @@ Layer: TypeAlias = tuple[
     Matcher,
     Matcher,
 ]
-"""One ignore-file's rules, and the directory they apply beneath.
+"""One ignore-file's rules, or the patterns given in code, and the directory they apply
+beneath.
 
 The elements are:
 
 1. The ignore-file's directory relative to the walk's root, with a "/" after each name:
-   "" for the root, or "a/b/" for "root/a/b".
+   "" for the root, or "a/b/" for "root/a/b". Patterns given in code apply beneath the
+   root, so theirs is always "".
 2. The matcher for files and symlinks, which leaves out the lines that only match
    directories.
 3. The matcher for directories.
 """
 
 Layers: TypeAlias = tuple[Layer, ...]
-"""The layers that apply to a directory's entries, deepest first."""
+"""Layers in the order they judge an entry. The first with a matching line decides."""
 
 
 def compile_rules(
@@ -175,6 +177,23 @@ def compile_matcher(
     )
 
 
+def compile_root_layers(lines: list[str]) -> Layers:
+    """Return patterns given in code compiled into layers.
+
+    The patterns are tied to the walk's root, like lines of an ignore-file there, so
+    they make one layer, with the prefix "".
+
+    Args:
+        lines: The patterns to compile, lowest rank first, so the last one that
+            matches decides, as in an ignore-file.
+
+    Returns:
+        The layer, or no layers if there are no patterns.
+    """
+    rules = compile_rules(lines)
+    return () if rules is None else (("", *rules),)
+
+
 def join_sources(
     sources: list[tuple[str, int]],
 ) -> tuple[Fullmatch | None, tuple[int, ...]]:
@@ -209,14 +228,18 @@ def join_sources(
 def is_ignored(layers: Layers, name: str, relative: str, is_dir: bool) -> bool:
     """Check if a directory entry is ignored.
 
-    The deepest ignore-file with a line that matches the entry decides, and within it,
-    the last line that matches.
+    The first layer with a line that matches the entry decides, and within it, the last
+    line that matches.
 
-    Ignore-files are documented at https://cariad.github.io/mosey/ignore-files/.
+    Ignore-files are documented at https://cariad.github.io/mosey/ignore-files/, and
+    default and overriding patterns at
+    https://cariad.github.io/mosey/default-and-overriding-patterns/.
 
     Args:
-        layers: The layers from the ignore-files in the directory that holds the entry
-            and every directory above it, deepest first.
+        layers: The layers that judge the entry, in order: the patterns given in code
+            that overrule the ignore-files, then the layers from the ignore-files in the
+            directory that holds the entry and every directory above it, deepest first,
+            then the patterns given in code that the ignore-files overrule.
         name: The entry's name.
         relative: The entry's path relative to the walk's root, with "/" between names.
         is_dir: Whether the entry is a directory. A symlink isn't, even one to a

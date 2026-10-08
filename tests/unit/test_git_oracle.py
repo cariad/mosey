@@ -4,7 +4,7 @@ from pathlib import Path
 
 from pytest import MonkeyPatch, mark, param, raises
 
-from tests.file_system_helpers import make_tree
+from tests.file_system_helpers import make_tree, skip_if_windows_cannot_create
 from tests.git_oracle import git_list_files, has_git
 from tests.markers import needs_git, needs_posix_permissions
 
@@ -76,6 +76,61 @@ def test_git_list_files__git(tmp_path: Path, path: str) -> None:
 
     with raises(ValueError):
         git_list_files(tmp_path, "ignore")
+
+
+@needs_git
+def test_git_list_files__no_ignore_filename(tmp_path: Path) -> None:
+    """Without an ignore-file name, Git reads no ignore-file, not even its own."""
+    make_tree(tmp_path, "a.txt")
+    (tmp_path / ".gitignore").write_bytes(b"*.txt\n")
+    (tmp_path / "ignore").write_bytes(b"*.txt\n")
+
+    assert git_list_files(tmp_path, None) == [".gitignore", "a.txt", "ignore"]
+
+
+@needs_git
+@mark.parametrize(
+    "weight",
+    [
+        param(1, id="exclude"),
+        param(0, id="exclude-from"),
+    ],
+)
+@mark.parametrize(
+    ("pattern", "tree", "expect"),
+    [
+        param('a"b', ['a"b', "ab"], ["ab"], id="double-quote"),
+        # Windows can't create a name holding '"', so this checks the quote there too.
+        # Without the quote, "a[!]b" would never match, since nothing closes its "[".
+        param('a[!"]b', ["ab", "axb"], ["ab"], id="double-quote-in-brackets"),
+        param("a'b", ["a'b", "ab"], ["ab"], id="single-quote"),
+        param("%PATH%", ["%PATH%", "PATH"], ["PATH"], id="percent"),
+        param("a^b", ["a^b", "ab"], ["ab"], id="caret"),
+        param("a&b", ["a&b", "ab"], ["ab"], id="ampersand"),
+        param("a*", ["ab", "b"], ["b"], id="star"),
+        param("a?c", ["abc", "ac"], ["ac"], id="question-mark"),
+        # Without the backslash, nothing would close the "[", and it would never match.
+        param("a\\[b", ["a[b", "ab"], ["ab"], id="escaped-bracket"),
+        param(" a", [" a", "a"], ["a"], id="leading-space"),
+        param("a\t", ["a\t", "a"], ["a"], id="trailing-tab"),
+        param("a\\ ", ["a ", "a"], ["a"], id="escaped-trailing-space"),
+        param("café", ["cafe", "café"], ["cafe"], id="non-ascii"),
+    ],
+)
+def test_git_list_files__pattern(
+    tmp_path: Path,
+    pattern: str,
+    tree: list[str],
+    expect: list[str],
+    weight: int,
+) -> None:
+    """Git is given each pattern exactly, as an argument or in a file of patterns."""
+    # Patterns weighing 1 or more are passed to Git as arguments, so on Windows, these
+    # check that Python's quoting of a command line reaches Git intact.
+    skip_if_windows_cannot_create(tree)
+    make_tree(tmp_path, *tree)
+
+    assert git_list_files(tmp_path, None, [(pattern, weight)]) == expect
 
 
 @needs_git
