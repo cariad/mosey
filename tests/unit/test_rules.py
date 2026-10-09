@@ -5,7 +5,15 @@ from typing import NamedTuple
 
 from pytest import mark, param
 
-from mosey.rules import Layer, Layers, compile_root_layers, compile_rules, is_ignored
+from mosey.rules import (
+    MAX_CHECKED_ENDINGS,
+    Layer,
+    Layers,
+    Matcher,
+    compile_root_layers,
+    compile_rules,
+    is_ignored,
+)
 from tests.file_system_helpers import (
     make_tree,
     skip_if_windows_cannot_create,
@@ -13,6 +21,9 @@ from tests.file_system_helpers import (
 )
 from tests.git_oracle import git_list_files
 from tests.markers import needs_git
+
+# One more ending than a name is checked against before it's looked up.
+MANY_ENDINGS = [f"*.{index}" for index in range(MAX_CHECKED_ENDINGS + 1)]
 
 
 class RuleCase(NamedTuple):
@@ -78,15 +89,18 @@ PRECEDENCE = [
     ),
     param(
         RuleCase(files={"": ["*.log", "!keep.log"]}, entry="keep.log", ignored=False),
-        id="wildcard-then-re-include",
+        id="ending-then-re-include",
     ),
     param(
         RuleCase(files={"": ["a", "!a", "a"]}, entry="a", ignored=True),
         id="repeated-line",
     ),
+    param(
+        RuleCase(files={"": ["*.log", "!*.log"]}, entry="a.log", ignored=False),
+        id="last-ending-wins",
+    ),
     # A plain name and a wildcard both match, and the later line decides, whichever
-    # kind it is and whichever is negated. (`wildcard-then-re-include` is the fourth
-    # way round.)
+    # kind it is and whichever is negated.
     param(
         RuleCase(files={"": ["a", "!a*"]}, entry="a", ignored=False),
         id="plain-name-then-negated-wildcard",
@@ -94,6 +108,10 @@ PRECEDENCE = [
     param(
         RuleCase(files={"": ["!a", "a*"]}, entry="a", ignored=True),
         id="negated-plain-name-then-wildcard",
+    ),
+    param(
+        RuleCase(files={"": ["a*", "!a"]}, entry="a", ignored=False),
+        id="wildcard-then-negated-plain-name",
     ),
     param(
         RuleCase(files={"": ["!a*", "a"]}, entry="a", ignored=True),
@@ -126,15 +144,62 @@ PRECEDENCE = [
         RuleCase(files={"": ["/a", "!a"]}, entry="a", ignored=False),
         id="plain-path-then-negated-plain-name",
     ),
-    # Two wildcards match, and the later one decides. The last line doesn't match, and
-    # changes nothing.
+    # An ending and a wildcard match, and the later one decides. The last line, another
+    # ending, doesn't match, and changes nothing.
     param(
         RuleCase(
             files={"": ["*.log", "!keep*", "*.tmp"]},
             entry="keep.log",
             ignored=False,
         ),
-        id="wildcard-then-negated-wildcard",
+        id="ending-then-negated-wildcard",
+    ),
+    # The same, but a "?" keeps "*.lo?" and "*.tm?" from being endings, so all three
+    # lines are in one regular expression.
+    param(
+        RuleCase(
+            files={"": ["*.lo?", "!keep*", "*.tm?"]},
+            entry="keep.log",
+            ignored=False,
+        ),
+        id="wildcard-then-negated-wildcard-no-endings",
+    ),
+    # A plain name and an ending both match, and the later line decides, whichever is
+    # negated. (`ending-then-re-include` is the fourth way round.)
+    param(
+        RuleCase(files={"": ["a.log", "!*.log"]}, entry="a.log", ignored=False),
+        id="plain-name-then-negated-ending",
+    ),
+    param(
+        RuleCase(files={"": ["!a.log", "*.log"]}, entry="a.log", ignored=True),
+        id="negated-plain-name-then-ending",
+    ),
+    param(
+        RuleCase(files={"": ["!*.log", "a.log"]}, entry="a.log", ignored=True),
+        id="negated-ending-then-plain-name",
+    ),
+    # An ending and a wildcard both match, and the later line decides, whichever is
+    # negated. (`ending-then-negated-wildcard` is the fourth way round.)
+    param(
+        RuleCase(files={"": ["a*", "!*.log"]}, entry="a.log", ignored=False),
+        id="wildcard-then-negated-ending",
+    ),
+    param(
+        RuleCase(files={"": ["!a*", "*.log"]}, entry="a.log", ignored=True),
+        id="negated-wildcard-then-ending",
+    ),
+    param(
+        RuleCase(files={"": ["!*.log", "a*"]}, entry="a.log", ignored=True),
+        id="negated-ending-then-wildcard",
+    ),
+    # Two endings match, and the later one decides, whichever is longer.
+    param(
+        RuleCase(files={"": ["*.gz", "!*.tar.gz"]}, entry="a.tar.gz", ignored=False),
+        id="ending-then-negated-longer-ending",
+    ),
+    param(
+        RuleCase(files={"": ["!*.tar.gz", "*.gz"]}, entry="a.tar.gz", ignored=True),
+        id="negated-longer-ending-then-ending",
     ),
 ]
 
@@ -237,6 +302,14 @@ DIRECTORY_ONLY = [
         RuleCase(files={"": ["a/"]}, entry="a", ignored=False),
         id="directory-only-file",
     ),
+    param(
+        RuleCase(files={"": ["*.log/"]}, entry="a.log/", ignored=True),
+        id="directory-only-ending-directory",
+    ),
+    param(
+        RuleCase(files={"": ["*.log/"]}, entry="a.log", ignored=False),
+        id="directory-only-ending-file",
+    ),
     # A line without a "/" at the end matches directories too.
     param(
         RuleCase(files={"": ["a"]}, entry="a/", ignored=True),
@@ -311,6 +384,20 @@ ANCHORING = [
         RuleCase(files={"sub": ["a/b"]}, entry="sub/a/b", ignored=True),
         id="nested-middle-slash",
     ),
+    # A "/" anchors a line that starts with "*.", so it matches the path from the
+    # ignore-file's directory, not any name with the same ending.
+    param(
+        RuleCase(files={"": ["/*.log"]}, entry="a.log", ignored=True),
+        id="anchored-ending",
+    ),
+    param(
+        RuleCase(files={"": ["/*.log"]}, entry="x/a.log", ignored=False),
+        id="anchored-ending-not-deeper",
+    ),
+    param(
+        RuleCase(files={"": ["*.d/x"]}, entry="a.d/x", ignored=True),
+        id="middle-slash-wildcard",
+    ),
     param(
         RuleCase(files={"": ["a", "!/a"]}, entry="x/a", ignored=True),
         id="negated-anchored-not-deeper",
@@ -339,6 +426,15 @@ ANCHORING = [
         RuleCase(files={"sub": ["**/a"]}, entry="sub/a", ignored=True),
         id="nested-leading-double-star-no-directory",
     ),
+    # A "**/" before a glob with no other "/" matches the same as the glob alone.
+    param(
+        RuleCase(files={"": ["**/*.log"]}, entry="x/y/a.log", ignored=True),
+        id="leading-double-star-ending",
+    ),
+    param(
+        RuleCase(files={"": ["**/x/a"]}, entry="y/x/a", ignored=True),
+        id="leading-double-star-path",
+    ),
     param(
         RuleCase(files={"sub": ["x/**/a"]}, entry="sub/x/y/a", ignored=True),
         id="nested-middle-double-star",
@@ -364,6 +460,62 @@ UNANCHORED = [
     param(
         RuleCase(files={"": ["*.log"]}, entry="x/y.log", ignored=True),
         id="wildcard-at-depth",
+    ),
+    # A line like "*.log" matches every name that ends with what follows its "*".
+    param(
+        RuleCase(files={"": ["*.gz"]}, entry="a.tar.gz", ignored=True),
+        id="ending-last-dot",
+    ),
+    param(
+        RuleCase(files={"": ["*.tar.gz"]}, entry="a.tar.gz", ignored=True),
+        id="ending-two-dots",
+    ),
+    param(
+        RuleCase(files={"": ["*.tar.gz"]}, entry="a.gz", ignored=False),
+        id="ending-two-dots-not-one",
+    ),
+    param(
+        RuleCase(files={"": ["*.c.d"]}, entry="a.b.c.d", ignored=True),
+        id="ending-several-dots",
+    ),
+    param(
+        RuleCase(files={"": ["*.b.c"]}, entry="a.b.c.d", ignored=False),
+        id="ending-several-dots-not-middle",
+    ),
+    param(
+        RuleCase(files={"": ["*.log"]}, entry="a.log.txt", ignored=False),
+        id="ending-not-in-middle",
+    ),
+    param(
+        RuleCase(files={"": ["*."]}, entry="a.", ignored=True),
+        id="ending-only-dot",
+    ),
+    param(
+        RuleCase(files={"": ["*.log"]}, entry="log", ignored=False),
+        id="ending-without-dot",
+    ),
+    # The "*" can match nothing.
+    param(
+        RuleCase(files={"": ["*.log"]}, entry=".log", ignored=True),
+        id="ending-whole-name",
+    ),
+    # A "?" after the "*." means the line isn't an ending.
+    param(
+        RuleCase(files={"": ["*.lo?"]}, entry="a.log", ignored=True),
+        id="ending-with-question-mark",
+    ),
+    # With more endings than a name is checked against first, it's only looked up.
+    param(
+        RuleCase(
+            files={"": MANY_ENDINGS},
+            entry=f"a.{MAX_CHECKED_ENDINGS}",
+            ignored=True,
+        ),
+        id="many-endings",
+    ),
+    param(
+        RuleCase(files={"": MANY_ENDINGS}, entry="a.log", ignored=False),
+        id="many-endings-not",
     ),
     # A "?", a bracket or a backslash means the line isn't a plain name.
     param(
@@ -391,12 +543,20 @@ UNANCHORED = [
         id="whole-name-wildcard",
     ),
     param(
+        RuleCase(files={"": ["a?"]}, entry="abc", ignored=False),
+        id="whole-name-question-mark",
+    ),
+    param(
         RuleCase(files={"": ["A"]}, entry="a", ignored=False),
         id="case",
     ),
     param(
         RuleCase(files={"": ["A*"]}, entry="a", ignored=False),
         id="case-wildcard",
+    ),
+    param(
+        RuleCase(files={"": ["*.LOG"]}, entry="a.log", ignored=False),
+        id="case-ending",
     ),
     # Only spaces are trimmed from the end of a line, so the tab is part of the name.
     param(
@@ -587,6 +747,35 @@ NOTHING_LEFT = [
 def test_compile_root_layers__nothing_left(lines: list[str]) -> None:
     """No layers are returned when no line is left to match."""
     assert compile_root_layers(lines) == ()
+
+
+def test_compile_rules__ending() -> None:
+    """A line like "*.log" is looked up by its ending, not by a regular expression."""
+    matcher: Matcher = ({}, {".log": 3}, (".log",), None, (), {}, None, ())
+    assert compile_rules(["*.log"]) == (matcher, matcher)
+
+
+def test_compile_rules__leading_double_star() -> None:
+    """A "**/" before a glob with no other "/" compiles as the glob alone."""
+    assert compile_rules(["**/a", "**/*.log"]) == compile_rules(["a", "*.log"])
+
+
+@mark.parametrize(
+    ("count", "checked"),
+    [
+        param(MAX_CHECKED_ENDINGS, True, id="checked"),
+        param(MAX_CHECKED_ENDINGS + 1, False, id="too-many-to-check"),
+    ],
+)
+def test_compile_rules__many_endings(count: int, checked: bool) -> None:
+    """A name is checked against the endings first only when there are few."""
+    endings = [f".{index}" for index in range(count)]
+    rules = compile_rules([f"*{ending}" for ending in endings])
+    assert rules is not None
+
+    for matcher in rules:
+        assert list(matcher[1]) == endings
+        assert matcher[2] == (tuple(endings) if checked else None)
 
 
 @mark.parametrize("lines", NOTHING_LEFT)
