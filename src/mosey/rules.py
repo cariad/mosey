@@ -6,10 +6,22 @@ by the package, and signatures can change without notice.
 
 import re
 from collections.abc import Callable
-from typing import TypeAlias
+from typing import Final, Literal, TypeAlias
 
 from .globs import SPECIAL, translate_glob
 from .patterns import parse_pattern
+
+MAX_CHECKED_ENDINGS: Final[int] = 24
+"""The most endings a matcher checks a name against with `str.endswith`, before looking
+the name up from each "." in it.
+
+Most names end with none of a few endings, so checking first saves the lookups. But the
+check takes longer the more endings there are, and the lookups don't.
+"""
+
+# NOTE: With the check first, judging a name against 24 endings took 4-15% less time
+# NOTE: than without it, against 32 between 10% less and 4% more, and against 64, 1-21%
+# NOTE: more, with or without 10 other lines, on Python 3.11 to 3.14 on arm64 macOS.
 
 Fullmatch: TypeAlias = Callable[
     [
@@ -21,7 +33,7 @@ Fullmatch: TypeAlias = Callable[
 
 Line: TypeAlias = tuple[
     str,
-    bool,
+    Literal["plain", "ending", "expression"],
     bool,
     int,
 ]
@@ -29,10 +41,14 @@ Line: TypeAlias = tuple[
 
 The elements are:
 
-1. The name or path the line matches if it's plain, or else its glob's regular
-   expression.
-2. Whether the line is plain: `True` if its glob holds no "*", "?", "[" or backslash,
-   so it only matches itself.
+1. The name or path the line matches if it's plain, its glob without the leading "*" if
+   it's an ending, or else its glob's regular expression.
+2. The line's kind:
+   - "plain" if its glob holds no "*", "?", "[" or backslash, so it only matches
+     itself.
+   - "ending" if it's unanchored and its glob is "*." then plain text, like "*.log", so
+     it matches every name that ends with its glob after the "*".
+   - "expression" for every other line.
 3. Whether the line is anchored: `True` if it matches paths relative to the ignore-
    file's directory, `False` if it matches names at any depth beneath it.
 4. The line's outcome (see `Matcher`).
@@ -40,6 +56,8 @@ The elements are:
 
 Matcher: TypeAlias = tuple[
     dict[str, int],
+    dict[str, int],
+    tuple[str, ...] | None,
     Fullmatch | None,
     tuple[int, ...],
     dict[str, int],
@@ -55,14 +73,18 @@ the one with the biggest outcome decides, and 0 means none does.
 The elements are:
 
 1. The plain unanchored lines: each name, and the outcome of the last line for it.
-2. The `fullmatch` of one regular expression for every other unanchored line, or
+2. The ending lines, which are all unanchored: each ending, like ".log" for "*.log", and
+   the outcome of the last line for it.
+3. Every ending, to check a name against with `str.endswith` before looking it up, or
+   `None` if there are more than `MAX_CHECKED_ENDINGS`.
+4. The `fullmatch` of one regular expression for every other unanchored line, or
    `None` if there are none.
-3. The outcome of each line in that expression, by the number of the group that follows
+5. The outcome of each line in that expression, by the number of the group that follows
    it.
-4. The plain anchored lines: each path, and the outcome of the last line for it.
-5. The `fullmatch` of one regular expression for every other anchored line, or `None`
+6. The plain anchored lines: each path, and the outcome of the last line for it.
+7. The `fullmatch` of one regular expression for every other anchored line, or `None`
    if there are none.
-6. The outcome of each line in that expression, by the number of the group that follows
+8. The outcome of each line in that expression, by the number of the group that follows
    it.
 """
 
@@ -121,15 +143,30 @@ def compile_rules(
 
         glob, negated, directory_only, anchored = pattern
 
+        # A leading "**/" matches at any depth. So when it's followed by a glob with no
+        # "/", like "**/*.log", the line means the same as that glob unanchored.
+        if glob.startswith("**/") and len(glob) > 3 and "/" not in glob[3:]:
+            glob = glob[3:]
+            anchored = False
+
         # A plain glob only matches itself, so it's looked up rather than translated.
-        plain = SPECIAL.search(glob) is None
-        text = glob if plain else translate_glob(glob)
+        # So is an unanchored glob like "*.log", by its ending: it matches every name
+        # that ends with ".log", and the ending can only start at a "." in the name.
+        if SPECIAL.search(glob) is None:
+            kind = "plain"
+            text = glob
+        elif not anchored and glob.startswith("*.") and SPECIAL.search(glob, 1) is None:
+            kind = "ending"
+            text = glob[1:]
+        else:
+            kind = "expression"
+            text = translate_glob(glob)
 
         if text is None:
             continue
 
         position += 1
-        kept = (text, plain, anchored, position * 2 + (not negated))
+        kept = (text, kind, anchored, position * 2 + (not negated))
         directory_lines.append(kept)
 
         # A line ending with "/" only matches directories, so files and symlinks never
@@ -155,15 +192,19 @@ def compile_matcher(
         The matcher.
     """
     names: dict[str, int] = {}
+    endings: dict[str, int] = {}
     name_sources: list[tuple[str, int]] = []
 
     paths: dict[str, int] = {}
     path_sources: list[tuple[str, int]] = []
 
-    for text, plain, anchored, outcome in lines:
-        if plain:
+    for text, kind, anchored, outcome in lines:
+        if kind == "plain":
             # A later line for the same name or path replaces the earlier one.
             (paths if anchored else names)[text] = outcome
+        elif kind == "ending":
+            # Likewise for the same ending. Only an unanchored line has one.
+            endings[text] = outcome
         elif anchored:
             path_sources.append((text, outcome))
         else:
@@ -171,6 +212,8 @@ def compile_matcher(
 
     return (
         names,
+        endings,
+        tuple(endings) if len(endings) <= MAX_CHECKED_ENDINGS else None,
         *join_sources(name_sources),
         paths,
         *join_sources(path_sources),
@@ -249,9 +292,16 @@ def is_ignored(layers: Layers, name: str, relative: str, is_dir: bool) -> bool:
         `True` if the entry is ignored, otherwise `False`.
     """
     for prefix, file_matcher, directory_matcher in layers:
-        names, name_match, name_outcomes, paths, path_match, path_outcomes = (
-            directory_matcher if is_dir else file_matcher
-        )
+        (
+            names,
+            endings,
+            few_endings,
+            name_match,
+            name_outcomes,
+            paths,
+            path_match,
+            path_outcomes,
+        ) = directory_matcher if is_dir else file_matcher
 
         # Of the lines that match, the one with the biggest outcome decides. Every
         # regular expression is followed by a group, so a match always has a
@@ -263,6 +313,29 @@ def is_ignored(layers: Layers, name: str, relative: str, is_dir: bool) -> bool:
 
             if other > outcome:
                 outcome = other
+
+        # NOTE: Judging a name against 5 endings and 10 other lines takes 0.22-0.26
+        # NOTE: microseconds this way, and against 300 endings and the same 10 lines,
+        # NOTE: 0.29-0.36, on Python 3.11 to 3.14 on arm64 macOS. With the endings in
+        # NOTE: the regular expression, it takes 0.26-0.30 and 5.4-6.1. Looking the name
+        # NOTE: up for each length of ending takes 0.42-0.52 and 0.57-0.77, always
+        # NOTE: checking it with `str.endswith` first 0.22-0.26 and 0.56-0.75, and
+        # NOTE: looking it up from each "." without the check 0.28-0.34 and 0.28-0.35.
+        # NOTE: When there are no endings, the check for them costs 4-12 nanoseconds per
+        # NOTE: name.
+
+        # An ending can only start at a "." in the name, so we look up what follows each
+        # one. A name can match several endings, like "*.gz" and "*.tar.gz".
+        if endings and (few_endings is None or name.endswith(few_endings)):
+            index = name.find(".")
+
+            while index != -1:
+                other = endings.get(name[index:], 0)
+
+                if other > outcome:
+                    outcome = other
+
+                index = name.find(".", index + 1)
 
         if paths or path_match is not None:
             # An anchored line matches the entry's path from the layer's directory.
