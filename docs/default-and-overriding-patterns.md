@@ -25,6 +25,7 @@ walker = builder.build()
 - A pattern means exactly what the same line would mean in an ignore-file in the directory you walk, following the ignore-files' rules for [writing patterns](ignore-files.md#writing-patterns) and [matching names and paths](ignore-files.md#matching-names-and-paths).
 - A `/` at the start or in the middle ties a pattern to the directory you walk, so `/todo.txt` only matches the `todo.txt` in that directory.
 - Patterns apply even when the walker reads no ignore-files.
+- [`Mosey.ignore_binary_files`][mosey.Mosey.ignore_binary_files] adds patterns that ignore [binary files](binary-files.md), like `*.pdf`.
 
 ### Weights
 

@@ -6,16 +6,19 @@ submodules.
 - `Mosey` describes a walk, and builds a `Walker` to take it.
 - `Walker` walks a directory and yields a `Step` for every file that isn't ignored.
 - `Step` describes a file system object discovered by a walk.
+- `BINARY_FILE_PATTERNS` lists the patterns that `Mosey.ignore_binary_files` adds.
 
 `Mosey` is the only class you create. `Walker` and `Step` are protocols: the types to
 annotate the walkers and steps that Mosey creates for you.
 """
 
+from .binary_files import BINARY_FILE_PATTERNS
 from .mosey_class import Mosey
 from .step import Step
 from .walker import Walker
 
 __all__ = [
+    "BINARY_FILE_PATTERNS",
     "Mosey",
     "Step",
     "Walker",

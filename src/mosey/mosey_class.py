@@ -7,6 +7,7 @@ module.
 from operator import itemgetter
 from typing import final
 
+from .binary_files import BINARY_FILE_PATTERNS
 from .mosey_walker import MoseyWalker
 from .patterns import check_pattern
 from .rules import compile_root_layers
@@ -83,6 +84,29 @@ class Mosey:
         """
         check_pattern(pattern)
         self._patterns = (*self._patterns, (weight, pattern))
+
+    def ignore_binary_files(
+        self,
+        *,
+        weight: int = 0,
+    ) -> None:
+        """Ignore binary files, like images, archives, and applications.
+
+        Adds every pattern in [`BINARY_FILE_PATTERNS`][mosey.BINARY_FILE_PATTERNS], in
+        order, exactly as [`add_pattern`][mosey.Mosey.add_pattern] would with the same
+        weight. Which files the patterns match is documented at
+        [binary files][binary-files].
+
+        Args:
+            weight: The patterns' weight, which decides whether the ignore-files can
+                overrule them.
+        """
+        # The patterns are fixed, and the tests check every one, so there's nothing to
+        # check here.
+        self._patterns = (
+            *self._patterns,
+            *((weight, pattern) for pattern in BINARY_FILE_PATTERNS),
+        )
 
     def set_ignore_filename(self, name: str) -> None:
         """Set the filename of the ignore-files that the walk reads.
