@@ -10,7 +10,7 @@ from typing import final
 from .binary_files import BINARY_FILE_PATTERNS
 from .mosey_walker import MoseyWalker
 from .patterns import check_pattern
-from .rules import compile_root_layers
+from .rules import compile_ignore_filename_layers, compile_root_layers
 from .walker import Walker
 
 
@@ -39,11 +39,18 @@ class Mosey:
 
     __slots__ = (
         "_ignore_filename",
+        "_ignore_ignore_files",
         "_patterns",
     )
 
     _ignore_filename: str | None
     """Filename of the ignore-files to read, or `None` to read none."""
+
+    _ignore_ignore_files: bool
+    """Whether the walk leaves out the ignore-files, rather than yielding them.
+
+    Only read when `_ignore_filename` isn't `None`.
+    """
 
     _patterns: tuple[tuple[int, str], ...]
     """Each pattern given in code, after its weight, in the order they were added.
@@ -54,6 +61,7 @@ class Mosey:
     def __init__(self) -> None:
         """Initialise a `Mosey` describing a walk with no ignore-files or patterns."""
         self._ignore_filename = None
+        self._ignore_ignore_files = True
         self._patterns = ()
 
     def add_pattern(
@@ -108,18 +116,30 @@ class Mosey:
             *((weight, pattern) for pattern in BINARY_FILE_PATTERNS),
         )
 
-    def set_ignore_filename(self, name: str) -> None:
+    def set_ignore_filename(
+        self,
+        name: str,
+        *,
+        ignore: bool = True,
+    ) -> None:
         """Set the filename of the ignore-files that the walk reads.
 
         When the walk reaches a directory, it reads the directory's
         [ignore-file][ignore-files] with this name, if it has one, then doesn't yield or
         walk the files and directories that its patterns ignore.
 
+        By default, the walk doesn't yield the ignore-files themselves either, unless a
+        line or pattern re-includes them, as documented at [ignore-files][ignore-files].
+        With `ignore` set to `False`, it yields them like any other file.
+
         The walk reads no ignore-files unless this is called. Calling it again replaces
-        the name set before, so a walk reads ignore-files with one name only.
+        the name and `ignore` set before, so a walk reads ignore-files with one name
+        only.
 
         Args:
             name: Filename of the ignore-files to read. For example, `.walkignore`.
+            ignore: Whether the walk leaves out the ignore-files that no line or pattern
+                re-includes, rather than yielding them.
 
         Raises:
             ValueError: When `name` is empty, "." or "..", or holds a slash, a backslash
@@ -131,6 +151,7 @@ class Mosey:
             raise ValueError(f"{name!r} isn't a filename")
 
         self._ignore_filename = name
+        self._ignore_ignore_files = ignore
 
     def build(self) -> Walker:
         """Build a walker that takes the walk described.
@@ -148,9 +169,18 @@ class Mosey:
 
         # In that order, the last matching rule wins, and the ignore-files rank above
         # every pattern weighing 0 and below every pattern weighing 1. So the heavy
-        # patterns judge before the ignore-files, and the light ones after.
+        # patterns judge before the ignore-files, and the light ones after. Leaving out
+        # the ignore-files themselves ranks below them all, so any line or pattern that
+        # matches an ignore-file decides first.
+        name = self._ignore_filename
+
         return MoseyWalker(
             heavy_layers=compile_root_layers([p for w, p in patterns if w > 0]),
-            ignore_filename=self._ignore_filename,
+            ignore_filename=name,
+            ignore_filename_layers=(
+                compile_ignore_filename_layers(name)
+                if name is not None and self._ignore_ignore_files
+                else ()
+            ),
             light_layers=compile_root_layers([p for w, p in patterns if w <= 0]),
         )

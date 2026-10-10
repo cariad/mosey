@@ -28,10 +28,7 @@ def test_add_pattern__default_weight(tmp_path: Path) -> None:
     # The ignore-file overrules "*.pdf" and keeps "a.pdf", so "*.pdf" weighs 0 or less.
     # And "*.pdf" overrules "!b.pdf", which weighs 0 and was added first, so it weighs 0
     # or more.
-    assert [step.relative_as_posix for step in walker.walk(tmp_path)] == [
-        "a.pdf",
-        "ignore",
-    ]
+    assert [step.relative_as_posix for step in walker.walk(tmp_path)] == ["a.pdf"]
 
 
 @mark.parametrize(

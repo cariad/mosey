@@ -350,8 +350,6 @@ def test_walk__interleaved(tmp_path: Path) -> None:
     assert next(one).relative_as_posix == "a"
     assert next(two).relative_as_posix == "b/x"
     assert next(one).relative_as_posix == "b/a"
-    assert next(two).relative_as_posix == "ignore"
-    assert next(one).relative_as_posix == "ignore"
     assert next(two).relative_as_posix == "x"
     assert next(one, None) is None
     assert next(two, None) is None

@@ -30,6 +30,7 @@ class MoseyWalker:
     __slots__ = (
         "_heavy_layers",
         "_ignore_filename",
+        "_ignore_filename_layers",
         "_judges",
         "_light_layers",
     )
@@ -39,6 +40,12 @@ class MoseyWalker:
 
     _ignore_filename: Final[str | None]
     """Filename of the ignore-files to read, or `None` to read none."""
+
+    _ignore_filename_layers: Final[Layers]
+    """The layers that leave out the ignore-files, or no layers to yield them.
+
+    They judge after every other layer, and only in a directory that holds the
+    ignore-file."""
 
     _judges: Final[bool]
     """Whether the walk judges any entries: `True` if it reads ignore-files or has any
@@ -52,6 +59,7 @@ class MoseyWalker:
         *,
         heavy_layers: Layers,
         ignore_filename: str | None,
+        ignore_filename_layers: Layers,
         light_layers: Layers,
     ) -> None:
         """Initialise a `MoseyWalker`.
@@ -64,11 +72,14 @@ class MoseyWalker:
                 ignore-file.
             ignore_filename: Filename of the ignore-files to read, or `None` to read
                 none.
+            ignore_filename_layers: The layers that leave out the ignore-files
+                themselves, or no layers to yield them.
             light_layers: The layers for the patterns given in code that every
                 ignore-file overrules.
         """
         self._heavy_layers = heavy_layers
         self._ignore_filename = ignore_filename
+        self._ignore_filename_layers = ignore_filename_layers
         self._light_layers = light_layers
 
         self._judges = (
@@ -128,6 +139,7 @@ class MoseyWalker:
                 self._heavy_layers,
                 self._light_layers,
                 self._ignore_filename,
+                self._ignore_filename_layers,
             )
         else:
             root_candidates, root_layers = list_candidates(root_str), ()
@@ -157,6 +169,7 @@ class MoseyWalker:
                             self._heavy_layers,
                             layers,
                             self._ignore_filename,
+                            self._ignore_filename_layers,
                         )
                     else:
                         path_candidates, path_layers = list_candidates(path), layers

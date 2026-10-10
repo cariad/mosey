@@ -16,12 +16,16 @@ from tests.git_oracle import git_list_files
 def build_walker(
     ignore_filename: str | None = None,
     patterns: Sequence[tuple[str, int]] = (),
+    ignore_ignore_files: bool = True,
 ) -> Walker:
     """Build a walker with the public builder.
 
     Args:
         ignore_filename: The name of the ignore-files to read, or `None` to read none.
         patterns: Each pattern to add, and its weight, in the order to add them.
+        ignore_ignore_files: Whether the walk leaves out the ignore-files, as
+            `Mosey.set_ignore_filename` takes `ignore`. Only used with an ignore-file
+            name.
 
     Returns:
         The walker.
@@ -29,7 +33,7 @@ def build_walker(
     builder = Mosey()
 
     if ignore_filename is not None:
-        builder.set_ignore_filename(ignore_filename)
+        builder.set_ignore_filename(ignore_filename, ignore=ignore_ignore_files)
 
     for pattern, weight in patterns:
         builder.add_pattern(pattern, weight=weight)
@@ -94,7 +98,8 @@ def list_files(root: Path, tree: list[str], lines: list[str]) -> list[str]:
         lines: Lines to write to the ignore-file, named "ignore", in the root.
 
     Returns:
-        The files Git lists, in order.
+        The files Git lists, in order. The ignore-file is listed unless a line ignores
+        it.
     """
     root.mkdir()
     make_tree(root, *tree)
@@ -106,7 +111,9 @@ def list_files(root: Path, tree: list[str], lines: list[str]) -> list[str]:
         },
     )
 
-    return git_list_files(root, "ignore")
+    # The ignore-file is yielded like any other file, so a listing shows whether a line
+    # matches it.
+    return git_list_files(root, "ignore", ignore_ignore_files=False)
 
 
 def make_broken_symlink(path: Path) -> None:
@@ -338,6 +345,7 @@ def relative_paths(
     root: Path,
     ignore_filename: str | None = None,
     patterns: Sequence[tuple[str, int]] = (),
+    ignore_ignore_files: bool = True,
 ) -> list[str]:
     """Walk a directory and return every step's relative path, in order.
 
@@ -345,11 +353,14 @@ def relative_paths(
         root: Path to the directory to walk.
         ignore_filename: The name of the ignore-files to read, or `None` to read none.
         patterns: Each pattern to add, and its weight, in the order to add them.
+        ignore_ignore_files: Whether the walk leaves out the ignore-files, as
+            `Mosey.set_ignore_filename` takes `ignore`. Only used with an ignore-file
+            name.
 
     Returns:
         The relative path of every step.
     """
-    walker = build_walker(ignore_filename, patterns)
+    walker = build_walker(ignore_filename, patterns, ignore_ignore_files)
     return [step.relative_as_posix for step in walker.walk(root)]
 
 
@@ -424,7 +435,8 @@ def walk_files(root: Path, tree: list[str], lines: list[str]) -> list[str]:
         lines: Lines to write to the ignore-file, named "ignore", in the root.
 
     Returns:
-        The relative paths of the files the walk yields, in order.
+        The relative paths of the files the walk yields, in order. The ignore-file is
+        yielded unless a line ignores it.
     """
     root.mkdir()
     make_tree(root, *tree)
@@ -436,7 +448,13 @@ def walk_files(root: Path, tree: list[str], lines: list[str]) -> list[str]:
         },
     )
 
-    return relative_paths(root, "ignore")
+    # The ignore-file is yielded like any other file, so a listing shows whether a line
+    # matches it.
+    return relative_paths(
+        root,
+        "ignore",
+        ignore_ignore_files=False,
+    )
 
 
 def windows_can_create(path: str) -> bool:

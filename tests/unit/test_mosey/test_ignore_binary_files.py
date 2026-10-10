@@ -18,6 +18,52 @@ def test_ignore_binary_files() -> None:
     assert Mosey().ignore_binary_files() is None
 
 
+@mark.parametrize(
+    "git",
+    [
+        param(False, id="walk"),
+        param(True, marks=needs_git, id="git"),
+    ],
+)
+def test_ignore_binary_files__example(tmp_path: Path, git: bool) -> None:
+    """The binary files page's example lists what it says."""
+    # The example from the binary files page, with its ignore-file named as the page
+    # names it.
+    make_tree(
+        tmp_path,
+        "Mixed.Jpg",
+        "SCAN.PDF",
+        "archive.tar.gz",
+        "docs/logo.svg",
+        "docs/manual.pdf",
+        "main.py",
+        "photos.zip/list.txt",
+        "server",
+    )
+
+    (tmp_path / ".walkignore").write_bytes(b"!manual.pdf\n")
+
+    if git:
+        # `ignore_binary_files` adds each pattern as `add_pattern` would, at weight 0.
+        patterns = [(pattern, 0) for pattern in BINARY_FILE_PATTERNS]
+        listed = git_list_files(tmp_path, ".walkignore", patterns)
+    else:
+        # The walker from the page.
+        builder = Mosey()
+        builder.set_ignore_filename(".walkignore")
+        builder.ignore_binary_files()
+        walker = builder.build()
+        listed = [step.relative_as_posix for step in walker.walk(tmp_path)]
+
+    assert listed == [
+        "Mixed.Jpg",
+        "docs/logo.svg",
+        "docs/manual.pdf",
+        "main.py",
+        "server",
+    ]
+
+
 @needs_git
 def test_ignore_binary_files__git(tmp_path: Path) -> None:
     """Git lists exactly the files that the walk yields."""
@@ -117,9 +163,9 @@ def test_ignore_binary_files__walk(tmp_path: Path) -> None:
 @mark.parametrize(
     ("arguments", "expect"),
     [
-        param({}, ["ignore", "report.pdf"], id="default"),
-        param({"weight": 0}, ["ignore", "report.pdf"], id="0"),
-        param({"weight": 1}, ["ignore"], id="1"),
+        param({}, ["notes.txt", "report.pdf"], id="default"),
+        param({"weight": 0}, ["notes.txt", "report.pdf"], id="0"),
+        param({"weight": 1}, ["notes.txt"], id="1"),
     ],
 )
 def test_ignore_binary_files__weight(
@@ -128,7 +174,7 @@ def test_ignore_binary_files__weight(
     expect: list[str],
 ) -> None:
     """The patterns weigh 0 unless given a weight, which decides if ignore-files win."""
-    make_tree(tmp_path, "report.pdf")
+    make_tree(tmp_path, "notes.txt", "report.pdf")
     write_ignore_files(tmp_path, {"": ["!report.pdf"]})
 
     builder = Mosey()

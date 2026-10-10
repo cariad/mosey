@@ -46,6 +46,9 @@ class IgnoreCase(NamedTuple):
     name: str = "ignore"
     """The ignore-file name that the walk and Git are given."""
 
+    ignore_ignore_files: bool = True
+    """Whether the walk and Git leave out the ignore-files."""
+
     divergence: str | None = None
     """Why Git lists differently, if it does."""
 
@@ -77,12 +80,25 @@ def build(root: Path, case: IgnoreCase) -> None:
     make_tree_with_ignore_files(root, case.ignore_files, case.tree)
 
 
+def walk(root: Path, case: IgnoreCase) -> list[str]:
+    """Walk a case's tree, and return every step's relative path, in order.
+
+    Args:
+        root: Path to the directory to walk.
+        case: The case to walk.
+
+    Returns:
+        The relative path of every step.
+    """
+    return relative_paths(root, case.name, ignore_ignore_files=case.ignore_ignore_files)
+
+
 PRECEDENCE = [
     param(
         IgnoreCase(
             ignore_files={"": ["*.log"], "sub": ["!keep.log"]},
             tree=["a.log", "keep.log", "sub/a.log", "sub/keep.log"],
-            listed=["ignore", "sub/ignore", "sub/keep.log"],
+            listed=["sub/keep.log"],
         ),
         id="deeper-re-includes",
     ),
@@ -90,7 +106,7 @@ PRECEDENCE = [
         IgnoreCase(
             ignore_files={"": ["*.log", "!keep.log"], "sub": ["keep.log"]},
             tree=["a.log", "keep.log", "sub/a.log", "sub/keep.log"],
-            listed=["ignore", "keep.log", "sub/ignore"],
+            listed=["keep.log"],
         ),
         id="deeper-ignores",
     ),
@@ -109,16 +125,7 @@ PRECEDENCE = [
                 "a/b/c/x.log",
                 "a/b/c/x.tmp",
             ],
-            listed=[
-                "a/b/c/x.log",
-                "a/b/c/x.tmp",
-                "a/b/ignore",
-                "a/b/x.log",
-                "a/b/x.tmp",
-                "a/ignore",
-                "a/x.log",
-                "ignore",
-            ],
+            listed=["a/b/c/x.log", "a/b/c/x.tmp", "a/b/x.log", "a/b/x.tmp", "a/x.log"],
         ),
         id="three-levels",
     ),
@@ -132,12 +139,7 @@ PRECEDENCE = [
                 "a/b/c/keep.log",
                 "a/b/c/d/keep.log",
             ],
-            listed=[
-                "a/b/c/d/keep.log",
-                "a/b/c/ignore",
-                "a/b/c/keep.log",
-                "ignore",
-            ],
+            listed=["a/b/c/d/keep.log", "a/b/c/keep.log"],
         ),
         id="deep-re-include",
     ),
@@ -146,7 +148,7 @@ PRECEDENCE = [
         IgnoreCase(
             ignore_files={"": ["*.log"], "a": ["*.tmp"]},
             tree=["a/b/x.log", "a/b/x.tmp", "a/b/y", "a/x.tmp"],
-            listed=["a/b/y", "a/ignore", "ignore"],
+            listed=["a/b/y"],
         ),
         id="two-files-reach-below",
     ),
@@ -156,7 +158,7 @@ PRECEDENCE = [
         IgnoreCase(
             ignore_files={"a": ["*.log"]},
             tree=["a/x.log", "a/b/x.log", "b/x.log", "x.log"],
-            listed=["a/ignore", "b/x.log", "x.log"],
+            listed=["b/x.log", "x.log"],
         ),
         id="sibling",
     ),
@@ -165,7 +167,7 @@ PRECEDENCE = [
         IgnoreCase(
             ignore_files={"": ["*.log"], "sub": ["# Only a comment"]},
             tree=["a.log", "sub/a.log", "sub/b"],
-            listed=["ignore", "sub/b", "sub/ignore"],
+            listed=["sub/b"],
         ),
         id="nested-file-without-rules",
     ),
@@ -176,7 +178,7 @@ PRECEDENCE = [
 def test_walk__precedence(tmp_path: Path, case: IgnoreCase) -> None:
     """The deepest ignore-file with a line that matches decides."""
     build(tmp_path, case)
-    assert relative_paths(tmp_path, case.name) == case.listed
+    assert walk(tmp_path, case) == case.listed
 
 
 ANCHORING = [
@@ -184,7 +186,7 @@ ANCHORING = [
         IgnoreCase(
             ignore_files={"sub": ["/top"]},
             tree=["top", "sub/top", "sub/x/top"],
-            listed=["sub/ignore", "sub/x/top", "top"],
+            listed=["sub/x/top", "top"],
         ),
         id="nested-anchored",
     ),
@@ -194,7 +196,7 @@ ANCHORING = [
         IgnoreCase(
             ignore_files={"a/b": ["/c/d/x"]},
             tree=["c/d/x", "a/b/c/d/x", "a/b/c/d/y", "a/b/e/c/d/x"],
-            listed=["a/b/c/d/y", "a/b/e/c/d/x", "a/b/ignore", "c/d/x"],
+            listed=["a/b/c/d/y", "a/b/e/c/d/x", "c/d/x"],
         ),
         id="deep-nested-anchored",
     ),
@@ -202,7 +204,7 @@ ANCHORING = [
         IgnoreCase(
             ignore_files={"": ["/a/b/x", "a/b/y"]},
             tree=["a/b/x", "a/b/y", "a/b/z", "c/a/b/x", "c/a/b/y"],
-            listed=["a/b/z", "c/a/b/x", "c/a/b/y", "ignore"],
+            listed=["a/b/z", "c/a/b/x", "c/a/b/y"],
         ),
         id="anchored-two-levels",
     ),
@@ -210,7 +212,7 @@ ANCHORING = [
         IgnoreCase(
             ignore_files={"": ["a/**/z"]},
             tree=["a/z", "a/b/c/d/y", "a/b/c/d/z", "x/a/z"],
-            listed=["a/b/c/d/y", "ignore", "x/a/z"],
+            listed=["a/b/c/d/y", "x/a/z"],
         ),
         id="double-star-deep",
     ),
@@ -219,7 +221,7 @@ ANCHORING = [
         IgnoreCase(
             ignore_files={"": ["a/**/"]},
             tree=["a/d", "a/b/c", "a/b/e/f", "x/a/b/g"],
-            listed=["a/d", "ignore", "x/a/b/g"],
+            listed=["a/d", "x/a/b/g"],
         ),
         id="double-star-directories",
     ),
@@ -229,7 +231,7 @@ ANCHORING = [
         IgnoreCase(
             ignore_files={"": ["**\\/a"]},
             tree=["a", "b", "x/a", "x/y/a"],
-            listed=["b", "ignore"],
+            listed=["b"],
             divergence=ESCAPED_SLASH,
         ),
         id="double-star-escaped-slash",
@@ -241,17 +243,18 @@ ANCHORING = [
 def test_walk__anchoring(tmp_path: Path, case: IgnoreCase) -> None:
     """A line with a "/" before its end matches the path from its file's directory."""
     build(tmp_path, case)
-    assert relative_paths(tmp_path, case.name) == case.listed
+    assert walk(tmp_path, case) == case.listed
 
 
 OWN_FILE = [
-    # An ignore-file is an ordinary file, so its own rules can drop it, and they still
-    # apply.
+    # When the walk yields ignore-files, each is an ordinary file, so its own rules can
+    # drop it, and they still apply.
     param(
         IgnoreCase(
             ignore_files={"": ["ignore", "a"]},
             tree=["a", "b"],
             listed=["b"],
+            ignore_ignore_files=False,
         ),
         id="ignores-itself",
     ),
@@ -260,6 +263,7 @@ OWN_FILE = [
             ignore_files={"sub": ["ignore", "a"]},
             tree=["a", "sub/a", "sub/b"],
             listed=["a", "sub/b"],
+            ignore_ignore_files=False,
         ),
         id="ignores-itself-nested",
     ),
@@ -268,6 +272,7 @@ OWN_FILE = [
             ignore_files={"": ["ignore", "*.log"], "sub": ["!keep.log"]},
             tree=["a.log", "b", "sub/a.log", "sub/keep.log"],
             listed=["b", "sub/keep.log"],
+            ignore_ignore_files=False,
         ),
         id="ignored-from-above",
     ),
@@ -276,7 +281,7 @@ OWN_FILE = [
         IgnoreCase(
             ignore_files={"sub": ["sub"]},
             tree=["x", "sub/a", "sub/sub/b"],
-            listed=["sub/a", "sub/ignore", "x"],
+            listed=["sub/a", "x"],
         ),
         id="names-own-directory",
     ),
@@ -294,9 +299,9 @@ OWN_FILE = [
 
 @mark.parametrize("case", OWN_FILE)
 def test_walk__own_file(tmp_path: Path, case: IgnoreCase) -> None:
-    """An ignore-file is a file like any other, and never judges its own directory."""
+    """An ignore-file never judges its own directory, and is a file like any other."""
     build(tmp_path, case)
-    assert relative_paths(tmp_path, case.name) == case.listed
+    assert walk(tmp_path, case) == case.listed
 
 
 DIRECTORIES = [
@@ -305,7 +310,7 @@ DIRECTORIES = [
         IgnoreCase(
             ignore_files={"": ["*.log"]},
             tree=["a-b", "a.log", "a.txt", "a/x", "a/y.log"],
-            listed=["a-b", "a.txt", "a/x", "ignore"],
+            listed=["a-b", "a.txt", "a/x"],
         ),
         id="order-kept",
     ),
@@ -313,7 +318,7 @@ DIRECTORIES = [
         IgnoreCase(
             ignore_files={"": ["build/", "!build/keep.txt"]},
             tree=["build/keep.txt", "build/x.txt", "keep.txt"],
-            listed=["ignore", "keep.txt"],
+            listed=["keep.txt"],
         ),
         id="ignored-directory",
     ),
@@ -321,7 +326,7 @@ DIRECTORIES = [
         IgnoreCase(
             ignore_files={"": ["build/*", "!build/keep.txt"]},
             tree=["build/keep.txt", "build/x.txt", "keep.txt"],
-            listed=["build/keep.txt", "ignore", "keep.txt"],
+            listed=["build/keep.txt", "keep.txt"],
         ),
         id="ignored-contents",
     ),
@@ -330,7 +335,7 @@ DIRECTORIES = [
         IgnoreCase(
             ignore_files={"": ["*.log", "logs/"], "logs": ["!*.log"]},
             tree=["a.log", "keep", "logs/b.log", "logs/c"],
-            listed=["ignore", "keep"],
+            listed=["keep"],
         ),
         id="ignored-directory-not-read",
     ),
@@ -338,7 +343,7 @@ DIRECTORIES = [
         IgnoreCase(
             ignore_files={"": ["build/"], "sub": ["!build/"]},
             tree=["build/a", "sub/build/a"],
-            listed=["ignore", "sub/build/a", "sub/ignore"],
+            listed=["sub/build/a"],
         ),
         id="deeper-re-includes-directory",
     ),
@@ -357,7 +362,7 @@ DIRECTORIES = [
         IgnoreCase(
             ignore_files={"sub/ignore": ["a"]},
             tree=["x", "sub/ignore/a", "sub/ignore/b"],
-            listed=["sub/ignore/b", "sub/ignore/ignore", "x"],
+            listed=["sub/ignore/b", "x"],
         ),
         id="directory-named-like-ignore-file",
     ),
@@ -368,7 +373,7 @@ DIRECTORIES = [
 def test_walk__directories(tmp_path: Path, case: IgnoreCase) -> None:
     """An ignored directory is never walked, and what's left keeps its order."""
     build(tmp_path, case)
-    assert relative_paths(tmp_path, case.name) == case.listed
+    assert walk(tmp_path, case) == case.listed
 
 
 RAW_NAMES = [
@@ -376,7 +381,7 @@ RAW_NAMES = [
         IgnoreCase(
             ignore_files={"": ["*.TXT"]},
             tree=["a.txt", "b.TXT"],
-            listed=["a.txt", "ignore"],
+            listed=["a.txt"],
         ),
         id="case-sensitive",
     ),
@@ -387,7 +392,7 @@ RAW_NAMES = [
         IgnoreCase(
             ignore_files={"": ["café"]},
             tree=["cafe\u0301", "sub/café"],
-            listed=["cafe\u0301", "ignore"],
+            listed=["cafe\u0301"],
         ),
         id="decomposed-name",
     ),
@@ -395,7 +400,7 @@ RAW_NAMES = [
         IgnoreCase(
             ignore_files={"": ["cafe\u0301"]},
             tree=["café", "sub/cafe\u0301"],
-            listed=["café", "ignore"],
+            listed=["café"],
         ),
         id="composed-name",
     ),
@@ -403,7 +408,7 @@ RAW_NAMES = [
         IgnoreCase(
             ignore_files={"": ["caf?"]},
             tree=["cafe", "café", "cafex"],
-            listed=["cafex", "ignore"],
+            listed=["cafex"],
             divergence=ONE_BYTE,
         ),
         id="question-mark-non-ascii",
@@ -415,7 +420,7 @@ RAW_NAMES = [
 def test_walk__raw_names(tmp_path: Path, case: IgnoreCase) -> None:
     """Names and patterns are compared exactly as written, and never normalised."""
     build(tmp_path, case)
-    assert relative_paths(tmp_path, case.name) == case.listed
+    assert walk(tmp_path, case) == case.listed
 
 
 FILE_FORMAT = [
@@ -423,7 +428,7 @@ FILE_FORMAT = [
         IgnoreCase(
             ignore_files={"sub": b"\xef\xbb\xbf*.log\r\n!keep.log\r\n"},
             tree=["a.log", "sub/a.log", "sub/keep.log"],
-            listed=["a.log", "sub/ignore", "sub/keep.log"],
+            listed=["a.log", "sub/keep.log"],
         ),
         id="bom-and-crlf",
     ),
@@ -432,7 +437,7 @@ FILE_FORMAT = [
         IgnoreCase(
             ignore_files={"sub": b"a\n" + POWERSHELL_LINE},
             tree=["x.log", "sub/a", "sub/b.log", "sub/c"],
-            listed=["sub/b.log", "sub/c", "sub/ignore", "x.log"],
+            listed=["sub/b.log", "sub/c", "x.log"],
             divergence=ZERO_BYTE,
         ),
         id="powershell",
@@ -442,7 +447,7 @@ FILE_FORMAT = [
         IgnoreCase(
             ignore_files={"": b"a" + POWERSHELL_LINE},
             tree=["a", "ab", "b.log"],
-            listed=["a", "ab", "b.log", "ignore"],
+            listed=["a", "ab", "b.log"],
             divergence=ZERO_BYTE,
         ),
         id="powershell-no-final-newline",
@@ -451,7 +456,7 @@ FILE_FORMAT = [
         IgnoreCase(
             ignore_files={"": b"ab\x00cd\nx\n"},
             tree=["ab", "abcd", "x", "y"],
-            listed=["ab", "abcd", "ignore", "y"],
+            listed=["ab", "abcd", "y"],
             divergence=ZERO_BYTE,
         ),
         id="zero-byte",
@@ -462,7 +467,7 @@ FILE_FORMAT = [
         IgnoreCase(
             ignore_files={"": b"[!\x00]\n"},
             tree=["a", "ab"],
-            listed=["a", "ab", "ignore"],
+            listed=["a", "ab"],
         ),
         id="zero-byte-in-brackets",
     ),
@@ -473,7 +478,7 @@ FILE_FORMAT = [
 def test_walk__file_format(tmp_path: Path, case: IgnoreCase) -> None:
     """A BOM, Windows line endings and lines holding a zero byte are handled."""
     build(tmp_path, case)
-    assert relative_paths(tmp_path, case.name) == case.listed
+    assert walk(tmp_path, case) == case.listed
 
 
 NAMES = [
@@ -504,7 +509,72 @@ NAMES = [
 def test_walk__names(tmp_path: Path, case: IgnoreCase) -> None:
     """Only a file with exactly the given name is read as an ignore-file."""
     build(tmp_path, case)
-    assert relative_paths(tmp_path, case.name) == case.listed
+    assert walk(tmp_path, case) == case.listed
+
+
+LEFT_OUT = [
+    param(
+        IgnoreCase(
+            ignore_files={"": ["a"], "sub": ["b"]},
+            tree=["a", "b", "sub/a", "sub/b", "sub/c"],
+            listed=["b", "sub/c"],
+        ),
+        id="left-out",
+    ),
+    param(
+        IgnoreCase(
+            ignore_files={"": ["a"], "sub": ["b"]},
+            tree=["a", "b", "sub/a", "sub/b", "sub/c"],
+            listed=["b", "ignore", "sub/c", "sub/ignore"],
+            ignore_ignore_files=False,
+        ),
+        id="yielded",
+    ),
+    # A line with no "/" re-includes every ignore-file beneath its own...
+    param(
+        IgnoreCase(
+            ignore_files={"": ["!ignore"], "sub": ["b"]},
+            tree=["a", "sub/b", "sub/c"],
+            listed=["a", "ignore", "sub/c", "sub/ignore"],
+        ),
+        id="re-included",
+    ),
+    # ...and one starting with "/" only re-includes its own.
+    param(
+        IgnoreCase(
+            ignore_files={"": ["!/ignore"], "sub": ["b"]},
+            tree=["a", "sub/b", "sub/c"],
+            listed=["a", "ignore", "sub/c"],
+        ),
+        id="re-included-beside-it",
+    ),
+    param(
+        IgnoreCase(
+            ignore_files={"": ["a"], "sub": ["!ignore"]},
+            tree=["a", "b", "sub/a", "sub/b"],
+            listed=["b", "sub/b", "sub/ignore"],
+        ),
+        id="re-included-deeper",
+    ),
+    # A nearer ignore-file's line beats a "!" further up.
+    param(
+        IgnoreCase(
+            ignore_files={"": ["!ignore"], "sub": ["ignore"]},
+            tree=["a", "sub/b"],
+            listed=["a", "ignore", "sub/b"],
+        ),
+        id="nearer-ignores",
+    ),
+    # A line that re-includes everything re-includes the ignore-files too.
+    param(
+        IgnoreCase(
+            ignore_files={"": ["!*"], "sub": ["b"]},
+            tree=["a", "sub/b", "sub/c"],
+            listed=["a", "ignore", "sub/c", "sub/ignore"],
+        ),
+        id="broad-re-include",
+    ),
+]
 
 
 @needs_git
@@ -518,6 +588,7 @@ def test_walk__names(tmp_path: Path, case: IgnoreCase) -> None:
         *RAW_NAMES,
         *FILE_FORMAT,
         *NAMES,
+        *LEFT_OUT,
     ],
 )
 def test_walk__git(tmp_path: Path, case: IgnoreCase) -> None:
@@ -529,7 +600,9 @@ def test_walk__git(tmp_path: Path, case: IgnoreCase) -> None:
         case.name,
     )
 
-    listed = git_list_files(tmp_path, case.name)
+    listed = git_list_files(
+        tmp_path, case.name, ignore_ignore_files=case.ignore_ignore_files
+    )
 
     if case.divergence:
         # Git should still list something different, or the reason no longer holds.
@@ -570,9 +643,7 @@ def test_walk__example(
     (tmp_path / "tools" / ".walkignore").write_bytes(b"!keep.log\n")
 
     assert list_paths(tmp_path, ".walkignore") == [
-        ".walkignore",
         "readme.md",
-        "tools/.walkignore",
         "tools/build",
         "tools/keep.log",
         "tools/todo.txt",
@@ -597,19 +668,32 @@ def test_walk__ignore_file_is_broken_symlink(tmp_path: Path) -> None:
 
 
 @needs_symlinks
-def test_walk__ignore_file_is_symlink(tmp_path: Path) -> None:
-    """A symlinked ignore-file is yielded as a file, and its rules apply."""
+@mark.parametrize(
+    ("ignore_ignore_files", "expect"),
+    [
+        param(True, ["a.log", "sub/c", "sub/ignore.target"], id="left-out"),
+        param(
+            False, ["a.log", "sub/c", "sub/ignore", "sub/ignore.target"], id="yielded"
+        ),
+    ],
+)
+def test_walk__ignore_file_is_symlink(
+    tmp_path: Path,
+    ignore_ignore_files: bool,
+    expect: list[str],
+) -> None:
+    """A symlinked ignore-file is read through the link, and is a file like any other.
+
+    Its rules apply, it's left out or yielded like any other ignore-file, and the file
+    it points to has a name of its own, so it's yielded like any other file.
+    """
     path = tmp_path / "sub" / "ignore"
     make_tree(tmp_path, "a.log", "sub/b.log", "sub/c")
     make_symlink_to_file(path)
     symlink_target(path).write_bytes(b"*.log\n")
 
-    assert relative_paths(tmp_path, "ignore") == [
-        "a.log",
-        "sub/c",
-        "sub/ignore",
-        "sub/ignore.target",
-    ]
+    walked = relative_paths(tmp_path, "ignore", ignore_ignore_files=ignore_ignore_files)
+    assert walked == expect
 
 
 @needs_posix_permissions
@@ -646,7 +730,7 @@ def test_walk__ignore_filename(tmp_path: Path) -> None:
     (tmp_path / "rules").write_bytes(b"a\n")
     (tmp_path / "sub" / "rules").write_bytes(b"b\n")
 
-    assert relative_paths(tmp_path, "rules") == ["b", "ignore", "rules", "sub/rules"]
+    assert relative_paths(tmp_path, "rules") == ["b", "ignore"]
 
 
 @needs_posix_permissions
@@ -664,7 +748,7 @@ def test_walk__ignored_directory_listing_is_denied(tmp_path: Path) -> None:
         with raises(PermissionError):
             relative_paths(tmp_path)
 
-        assert relative_paths(tmp_path, "ignore") == ["a", "c", "ignore"]
+        assert relative_paths(tmp_path, "ignore") == ["a", "c"]
     finally:
         # Restore access so pytest can clean up `tmp_path`.
         denied.chmod(0o700)
@@ -682,7 +766,7 @@ def test_walk__lazy_directory_ignore_file(tmp_path: Path) -> None:
     # itself yet.
     write_ignore_files(tmp_path, {"b": ["y"]})
 
-    assert [step.relative_as_posix for step in steps] == ["b/ignore", "b/x"]
+    assert [step.relative_as_posix for step in steps] == ["b/x"]
 
 
 def test_walk__lazy_root_ignore_file(tmp_path: Path) -> None:
@@ -692,7 +776,14 @@ def test_walk__lazy_root_ignore_file(tmp_path: Path) -> None:
     steps = build_walker("ignore").walk(tmp_path)
     write_ignore_files(tmp_path, {"": ["b"]})
 
-    assert [step.relative_as_posix for step in steps] == ["a", "ignore"]
+    assert [step.relative_as_posix for step in steps] == ["a"]
+
+
+@mark.parametrize("case", LEFT_OUT)
+def test_walk__left_out(tmp_path: Path, case: IgnoreCase) -> None:
+    """The walk leaves out the ignore-files, unless a line re-includes them."""
+    build(tmp_path, case)
+    assert walk(tmp_path, case) == case.listed
 
 
 def test_walk__no_ignore_filename(tmp_path: Path) -> None:
@@ -766,7 +857,7 @@ def test_walk__not_utf8(tmp_path: Path) -> None:
     ).stdout.split(b"\0")
 
     # Git lists the same files, since it reads names and lines one byte at a time.
-    assert walked == [b"ignore", b"one/caf\xc3\xa9", b"three/cafe", b"two/cafe"]
+    assert walked == [b"one/caf\xc3\xa9", b"three/cafe", b"two/cafe"]
 
 
 def test_walk__same_root_twice(tmp_path: Path) -> None:
@@ -775,11 +866,11 @@ def test_walk__same_root_twice(tmp_path: Path) -> None:
     write_ignore_files(tmp_path, {"": ["a"]})
     walker = build_walker("ignore")
 
-    assert [step.relative_as_posix for step in walker.walk(tmp_path)] == ["b", "ignore"]
+    assert [step.relative_as_posix for step in walker.walk(tmp_path)] == ["b"]
 
     write_ignore_files(tmp_path, {"": ["b"]})
 
-    assert [step.relative_as_posix for step in walker.walk(tmp_path)] == ["a", "ignore"]
+    assert [step.relative_as_posix for step in walker.walk(tmp_path)] == ["a"]
 
 
 @needs_posix_permissions

@@ -93,14 +93,14 @@ Layer: TypeAlias = tuple[
     Matcher,
     Matcher,
 ]
-"""One ignore-file's rules, or the patterns given in code, and the directory they apply
-beneath.
+"""One ignore-file's rules, the patterns given in code, or the line that leaves out the
+ignore-files, and the directory they apply beneath.
 
 The elements are:
 
 1. The ignore-file's directory relative to the walk's root, with a "/" after each name:
-   "" for the root, or "a/b/" for "root/a/b". Patterns given in code apply beneath the
-   root, so theirs is always "".
+   "" for the root, or "a/b/" for "root/a/b". Patterns given in code, and the line that
+   leaves out the ignore-files, apply beneath the root, so theirs is always "".
 2. The matcher for files and symlinks, which leaves out the lines that only match
    directories.
 3. The matcher for directories.
@@ -108,6 +108,32 @@ The elements are:
 
 Layers: TypeAlias = tuple[Layer, ...]
 """Layers in the order they judge an entry. The first with a matching line decides."""
+
+
+def compile_ignore_filename_layers(name: str) -> Layers:
+    """Return the layers that leave out the ignore-files themselves.
+
+    The one layer matches files and symlinks with exactly this name, and never a
+    directory, so a directory named like the ignore-file is still walked. The name is
+    looked up rather than read as a glob, so a name like "a*b" or "!a" only matches
+    itself.
+
+    It judges after every other layer, and only in a directory that holds the
+    ignore-file, so any other line or pattern that matches the ignore-file decides
+    first.
+
+    Ignore-files are documented at https://cariad.github.io/mosey/ignore-files/.
+
+    Args:
+        name: The ignore-files' name.
+
+    Returns:
+        The layers.
+    """
+    # The one line is plain, unanchored, and the first, so its outcome is 3. A plain
+    # line is looked up by the whole name, so nothing in the name needs escaping.
+    line: Line = (name, "plain", False, 3)
+    return (("", compile_matcher([line]), compile_matcher([])),)
 
 
 def compile_rules(
@@ -282,7 +308,8 @@ def is_ignored(layers: Layers, name: str, relative: str, is_dir: bool) -> bool:
         layers: The layers that judge the entry, in order: the patterns given in code
             that overrule the ignore-files, then the layers from the ignore-files in the
             directory that holds the entry and every directory above it, deepest first,
-            then the patterns given in code that the ignore-files overrule.
+            then the patterns given in code that the ignore-files overrule, then, in a
+            directory that holds the ignore-file, the layer that leaves it out.
         name: The entry's name.
         relative: The entry's path relative to the walk's root, with "/" between names.
         is_dir: Whether the entry is a directory. A symlink isn't, even one to a

@@ -18,8 +18,9 @@ build/
 ### Finding ignore-files
 
 - Mosey reads the ignore-file in the directory you walk, and in every directory beneath it, but never in a directory above it.
-- Ignore-files are files too, so Mosey yields them unless a pattern ignores them.
-- An ignore-file's patterns still apply when a pattern ignores the ignore-file itself.
+- Mosey doesn't yield ignore-files, unless a line or a [pattern](default-and-overriding-patterns.md) of any weight re-includes them, like `!.walkignore`.
+- To yield ignore-files like any other file, call [`Mosey.set_ignore_filename`][mosey.Mosey.set_ignore_filename] with `ignore=False`.
+- An ignore-file's patterns apply whether or not it's yielded.
 
 ### Writing patterns
 
@@ -102,9 +103,7 @@ build/
 Walking the `root` directory with a walker whose ignore-file name is `.walkignore` (set with [`Mosey.set_ignore_filename`][mosey.Mosey.set_ignore_filename]) yields these files, in the usual [walk order](walk-order.md):
 
 ```text
-.walkignore
 readme.md
-tools/.walkignore
 tools/build
 tools/keep.log
 tools/todo.txt
@@ -114,7 +113,7 @@ Why?
 
 | Path                  | Result      | Why                                                                                          |
 | -                     | -           | -                                                                                            |
-| `.walkignore`         | Yielded     | No line matches it.                                                                          |
+| `.walkignore`         | Ignored     | It's an ignore-file, and no line re-includes it.                                             |
 | `build/`              | Ignored     | `build/` matches directories named `build`.                                                  |
 | `build/.walkignore`   | Not reached | Mosey never walks into `build`, so it never reads this ignore-file.                          |
 | `build/app.log`       | Not reached | Mosey never walks into `build`.                                                              |
@@ -122,7 +121,7 @@ Why?
 | `readme.md`           | Yielded     | No line matches it.                                                                          |
 | `todo.txt`            | Ignored     | `/todo.txt` matches it.                                                                      |
 | `tools/`              | Walked      | No line matches it.                                                                          |
-| `tools/.walkignore`   | Yielded     | No line matches it.                                                                          |
+| `tools/.walkignore`   | Ignored     | It's an ignore-file, and no line re-includes it.                                             |
 | `tools/build`         | Yielded     | `build/` only matches directories, and this is a file.                                       |
 | `tools/debug.log`     | Ignored     | `*.log` has no `/`, so it matches a name at any depth.                                       |
 | `tools/keep.log`      | Yielded     | `*.log` matches it, but `tools/.walkignore` is nearer, and its `!keep.log` re-includes it.   |
@@ -138,8 +137,9 @@ Why?
 - **`docs/**` doesn't match `docs` itself**, only everything inside it.
 - **A nearer ignore-file beats a `!` further up.** If the root's ignore-file holds `*.log` then `!keep.log`, and `sub/.walkignore` holds `*.log`, then `sub/keep.log` is ignored.
 - **A broken line matches nothing, and the rest of the file still applies.** That's a line with a `[` that nothing closes, like `[abc.txt` (which doesn't even match a file named `[abc.txt`), an unknown class, like `[[:letter:]]`, or a path that would need tidying up, like `./todo.txt` or `docs//todo.txt`.
-- **The filename must match exactly.** A file named `.WALKIGNORE` isn't read as `.walkignore`, even on macOS and Windows. A directory named `.walkignore` is walked like any other directory.
-- **A symlinked ignore-file is read through the link.** The symlink itself is still yielded, like any other symlink.
+- **The filename must match exactly.** A file named `.WALKIGNORE` isn't read as `.walkignore`, or skipped like one, even on macOS and Windows. A directory named `.walkignore` is walked like any other directory.
+- **A symlinked ignore-file is read through the link.** Mosey skips the symlink like any other ignore-file, and judges the file it points to by its own name and path, like any other file.
+- **A broad `!` line re-includes ignore-files too.** `!*` and `!.*` match `.walkignore`, so they re-include it along with everything else they match.
 - **An ignore-file is read once per walk**, when the walk reaches its directory, so editing it after that makes no difference until the next walk.
 - **An ignore-file that can't be read stops the walk.** The walk raises an `OSError` naming it, for example when permissions deny reading it, or it's a broken symlink.
 - **A directory that can be listed but not searched stops the walk if it holds the ignore-file.** On Linux and macOS, that's a directory with read but not execute permission. Without an ignore-file name, Mosey would yield its files; with one, the walk raises `PermissionError`.

@@ -39,6 +39,9 @@ class PatternCase(NamedTuple):
     name: str | None = "ignore"
     """The ignore-file name that the walk and Git are given, or `None` to read none."""
 
+    ignore_ignore_files: bool = True
+    """Whether the walk and Git leave out the ignore-files."""
+
     divergence: str | None = None
     """Why Git lists differently, if it does."""
 
@@ -52,16 +55,24 @@ WEIGHTS = [
             ignore_files={"": ["!a.log"], "sub": ["!b.log"]},
             tree=["a.log", "b.log", "c.log", "sub/a.log", "sub/b.log", "sub/c.log"],
             patterns=[("*.log", 0)],
-            listed=["a.log", "ignore", "sub/a.log", "sub/b.log", "sub/ignore"],
+            listed=["a.log", "sub/a.log", "sub/b.log"],
         ),
         id="light-loses-to-ignore-files",
     ),
     param(
         PatternCase(
             ignore_files={"": ["!a.log"], "sub": ["!b.log"]},
-            tree=["a.log", "b.log", "c.log", "sub/a.log", "sub/b.log", "sub/c.log"],
+            tree=[
+                "a.log",
+                "b.log",
+                "c.log",
+                "readme",
+                "sub/a.log",
+                "sub/b.log",
+                "sub/c.log",
+            ],
             patterns=[("*.log", 1)],
-            listed=["ignore", "sub/ignore"],
+            listed=["readme"],
         ),
         id="heavy-beats-ignore-files",
     ),
@@ -108,7 +119,7 @@ WEIGHTS = [
             ignore_files={"": ["!keep.log"]},
             tree=["a.log", "keep.log", "readme"],
             patterns=[("*.log", -1)],
-            listed=["ignore", "keep.log", "readme"],
+            listed=["keep.log", "readme"],
         ),
         id="negative-loses-to-ignore-files",
     ),
@@ -155,7 +166,7 @@ WEIGHTS = [
             ignore_files={"": ["*.log"], "sub": ["*.log"]},
             tree=["a.log", "keep.log", "sub/a.log", "sub/keep.log"],
             patterns=[("!keep.log", 1)],
-            listed=["ignore", "keep.log", "sub/ignore", "sub/keep.log"],
+            listed=["keep.log", "sub/keep.log"],
         ),
         id="heavy-re-includes-over-ignore-files",
     ),
@@ -166,7 +177,7 @@ WEIGHTS = [
             ignore_files={"": ["!*.log"]},
             tree=["a.log", "keep.log", "readme"],
             patterns=[("*.log", 1), ("!keep.log", 1)],
-            listed=["ignore", "keep.log", "readme"],
+            listed=["keep.log", "readme"],
         ),
         id="equal-heavy-weight-last-wins",
     ),
@@ -175,7 +186,7 @@ WEIGHTS = [
             ignore_files={"": ["!*.log"]},
             tree=["a.log", "keep.log", "readme"],
             patterns=[("!keep.log", 1), ("*.log", 1)],
-            listed=["ignore", "readme"],
+            listed=["readme"],
         ),
         id="equal-heavy-weight-last-wins-reversed",
     ),
@@ -210,7 +221,7 @@ WEIGHTS = [
                 ("*.log", 1),
                 ("!keep.tmp", 1),
             ],
-            listed=["ignore", "keep.log", "readme"],
+            listed=["keep.log", "readme"],
         ),
         id="several-heavy",
     ),
@@ -221,7 +232,7 @@ WEIGHTS = [
             ignore_files={"": ["*.tmp"], "sub": ["*.log"]},
             tree=["a.log", "a.tmp", "keep.log", "sub/a.log", "sub/keep.log"],
             patterns=[("*.log", 0), ("!keep.log", 0)],
-            listed=["ignore", "keep.log", "sub/ignore"],
+            listed=["keep.log"],
         ),
         id="light-re-include",
     ),
@@ -236,7 +247,7 @@ ANCHORING = [
             ignore_files={"tools": ["*.log"]},
             tree=["todo.txt", "tools/a.log", "tools/todo.txt"],
             patterns=[("/todo.txt", 0)],
-            listed=["tools/ignore", "tools/todo.txt"],
+            listed=["tools/todo.txt"],
         ),
         id="anchored-light",
     ),
@@ -245,7 +256,7 @@ ANCHORING = [
             ignore_files={"tools": ["*.log"]},
             tree=["todo.txt", "tools/a.log", "tools/todo.txt"],
             patterns=[("/todo.txt", 1)],
-            listed=["tools/ignore", "tools/todo.txt"],
+            listed=["tools/todo.txt"],
         ),
         id="anchored-heavy",
     ),
@@ -261,13 +272,7 @@ ANCHORING = [
                 "x/docs/a.md",
             ],
             patterns=[("docs/*.md", 0)],
-            listed=[
-                "a.md",
-                "docs/c.txt",
-                "docs/ignore",
-                "docs/sub/a.md",
-                "x/docs/a.md",
-            ],
+            listed=["a.md", "docs/c.txt", "docs/sub/a.md", "x/docs/a.md"],
         ),
         id="anchored-middle-slash",
     ),
@@ -278,7 +283,7 @@ ANCHORING = [
             ignore_files={"a/b": ["y"]},
             tree=["a/b/x", "a/b/y", "a/b/z", "a/b/a/b/x", "c/a/b/x"],
             patterns=[("a/b/x", 1)],
-            listed=["a/b/a/b/x", "a/b/ignore", "a/b/z", "c/a/b/x"],
+            listed=["a/b/a/b/x", "a/b/z", "c/a/b/x"],
         ),
         id="anchored-deep",
     ),
@@ -296,7 +301,7 @@ ANCHORING = [
             ignore_files={"b/c": ["!a.log"]},
             tree=["a.log", "b/a.log", "b/c/a.log", "b/c/d/a.log", "b/c/d/e"],
             patterns=[("a.log", 1)],
-            listed=["b/c/d/e", "b/c/ignore"],
+            listed=["b/c/d/e"],
         ),
         id="unanchored-heavy",
     ),
@@ -309,7 +314,7 @@ PRUNING = [
             ignore_files={"": ["!build/"]},
             tree=["build/a", "keep"],
             patterns=[("build/", 1)],
-            listed=["ignore", "keep"],
+            listed=["keep"],
         ),
         id="heavy-ignores-directory",
     ),
@@ -320,7 +325,7 @@ PRUNING = [
             ignore_files={"": ["build/", "*.o"]},
             tree=["build/a", "build/b.o", "keep"],
             patterns=[("!build/", 1)],
-            listed=["build/a", "ignore", "keep"],
+            listed=["build/a", "keep"],
         ),
         id="heavy-re-includes-directory",
     ),
@@ -330,7 +335,7 @@ PRUNING = [
             ignore_files={"": ["build/"]},
             tree=["build/x", "build/y", "keep"],
             patterns=[("!build/x", 1)],
-            listed=["ignore", "keep"],
+            listed=["keep"],
         ),
         id="heavy-cannot-reach-inside",
     ),
@@ -341,7 +346,7 @@ PRUNING = [
             ignore_files={"": ["build/*"]},
             tree=["build/x", "build/y", "keep"],
             patterns=[("!build/x", 1)],
-            listed=["build/x", "ignore", "keep"],
+            listed=["build/x", "keep"],
         ),
         id="heavy-re-includes-contents",
     ),
@@ -350,7 +355,7 @@ PRUNING = [
             ignore_files={"sub": ["!build/"]},
             tree=["build/a", "sub/build/a"],
             patterns=[("build/", 0)],
-            listed=["sub/build/a", "sub/ignore"],
+            listed=["sub/build/a"],
         ),
         id="light-undone-by-nested",
     ),
@@ -375,6 +380,7 @@ OWN_FILE = [
             tree=["a", "b", "sub/a", "sub/b"],
             patterns=[("ignore", 0)],
             listed=["b", "sub/a"],
+            ignore_ignore_files=False,
         ),
         id="ignores-every-ignore-file",
     ),
@@ -384,8 +390,38 @@ OWN_FILE = [
             tree=["a", "b", "sub/a", "sub/b"],
             patterns=[("/ignore", 1)],
             listed=["b", "sub/a", "sub/ignore"],
+            ignore_ignore_files=False,
         ),
         id="ignores-root-ignore-file",
+    ),
+    # Leaving out the ignore-files ranks below every pattern, whatever its weight, but
+    # only a heavy pattern overrules the ignore-file in "sub", which ignores itself.
+    param(
+        PatternCase(
+            ignore_files={"": ["a"], "sub": ["ignore"]},
+            tree=["a", "b", "sub/c"],
+            patterns=[("!ignore", -5)],
+            listed=["b", "ignore", "sub/c"],
+        ),
+        id="negative-re-includes",
+    ),
+    param(
+        PatternCase(
+            ignore_files={"": ["a"], "sub": ["ignore"]},
+            tree=["a", "b", "sub/c"],
+            patterns=[("!ignore", 0)],
+            listed=["b", "ignore", "sub/c"],
+        ),
+        id="light-re-includes",
+    ),
+    param(
+        PatternCase(
+            ignore_files={"": ["a"], "sub": ["ignore"]},
+            tree=["a", "b", "sub/c"],
+            patterns=[("!ignore", 1)],
+            listed=["b", "ignore", "sub/c", "sub/ignore"],
+        ),
+        id="heavy-re-includes",
     ),
 ]
 
@@ -472,11 +508,24 @@ def build(root: Path, case: PatternCase) -> None:
     )
 
 
+def walk(root: Path, case: PatternCase) -> list[str]:
+    """Walk a case's tree, and return every step's relative path, in order.
+
+    Args:
+        root: Path to the directory to walk.
+        case: The case to walk.
+
+    Returns:
+        The relative path of every step.
+    """
+    return relative_paths(root, case.name, case.patterns, case.ignore_ignore_files)
+
+
 @mark.parametrize("case", ANCHORING)
 def test_walk__anchoring(tmp_path: Path, case: PatternCase) -> None:
     """A pattern with a "/" before its end matches paths from the walked directory."""
     build(tmp_path, case)
-    assert relative_paths(tmp_path, case.name, case.patterns) == case.listed
+    assert walk(tmp_path, case) == case.listed
 
 
 @needs_git
@@ -494,7 +543,9 @@ def test_walk__anchoring(tmp_path: Path, case: PatternCase) -> None:
 def test_walk__git(tmp_path: Path, case: PatternCase) -> None:
     """Git lists exactly the files that the walk yields."""
     build(tmp_path, case)
-    listed = git_list_files(tmp_path, case.name, case.patterns)
+    listed = git_list_files(
+        tmp_path, case.name, case.patterns, case.ignore_ignore_files
+    )
 
     if case.divergence:
         # Git should still list something different, or the reason no longer holds.
@@ -518,14 +569,14 @@ def test_walk__ignored_directory_ignore_file_is_broken_symlink(tmp_path: Path) -
 def test_walk__no_ignore_filename(tmp_path: Path, case: PatternCase) -> None:
     """Patterns apply when the walk reads no ignore-files, heaviest first."""
     build(tmp_path, case)
-    assert relative_paths(tmp_path, case.name, case.patterns) == case.listed
+    assert walk(tmp_path, case) == case.listed
 
 
 @mark.parametrize("case", OWN_FILE)
 def test_walk__own_file(tmp_path: Path, case: PatternCase) -> None:
-    """An ignore-file that a pattern ignores isn't yielded, but still applies."""
+    """A pattern can decide if an ignore-file is yielded, and its lines still apply."""
     build(tmp_path, case)
-    assert relative_paths(tmp_path, case.name, case.patterns) == case.listed
+    assert walk(tmp_path, case) == case.listed
 
 
 @mark.parametrize(
@@ -556,8 +607,6 @@ def test_walk__patterns_example(
     (tmp_path / "docs" / ".walkignore").write_bytes(b"!*.iso\n")
 
     assert list_paths(tmp_path, ".walkignore", [("*.pdf", 0), ("*.iso", 1)]) == [
-        ".walkignore",
-        "docs/.walkignore",
         "manual.pdf",
         "readme.md",
     ]
@@ -567,7 +616,7 @@ def test_walk__patterns_example(
 def test_walk__pruning(tmp_path: Path, case: PatternCase) -> None:
     """A directory that a pattern ignores is never walked."""
     build(tmp_path, case)
-    assert relative_paths(tmp_path, case.name, case.patterns) == case.listed
+    assert walk(tmp_path, case) == case.listed
 
 
 @mark.parametrize("weight", [param(1, id="heavy"), param(0, id="light")])
@@ -583,7 +632,7 @@ def test_walk__root_never_judged(tmp_path: Path, weight: int) -> None:
 def test_walk__trailing_spaces(tmp_path: Path, case: PatternCase) -> None:
     """Spaces at the end of a pattern are removed, as from a line of an ignore-file."""
     build(tmp_path, case)
-    assert relative_paths(tmp_path, case.name, case.patterns) == case.listed
+    assert walk(tmp_path, case) == case.listed
 
 
 @mark.parametrize("weight", [param(1, id="heavy"), param(0, id="light")])
@@ -605,4 +654,4 @@ def test_walk__two_roots(tmp_path: Path, weight: int) -> None:
 def test_walk__weights(tmp_path: Path, case: PatternCase) -> None:
     """A pattern's weight says which patterns and ignore-files it overrules."""
     build(tmp_path, case)
-    assert relative_paths(tmp_path, case.name, case.patterns) == case.listed
+    assert walk(tmp_path, case) == case.listed

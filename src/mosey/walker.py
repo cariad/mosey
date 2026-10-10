@@ -35,7 +35,8 @@ class Walker(Protocol):
         [`Mosey.add_pattern`][mosey.Mosey.add_pattern], and, when it has an ignore-file
         name (set by [`Mosey.set_ignore_filename`][mosey.Mosey.set_ignore_filename]),
         those in each directory's [ignore-file][ignore-files], which is read when the
-        walk reaches the directory.
+        walk reaches the directory. The ignore-files themselves aren't yielded either,
+        unless the name was set with `ignore=False`, or a pattern re-includes them.
 
         A relative root is found from the working directory each time a subdirectory is
         read, so don't change the working directory during a walk.
