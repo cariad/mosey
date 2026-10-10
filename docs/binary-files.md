@@ -69,7 +69,6 @@ walker = builder.build()
 ...yields these files when it walks the `root` directory, in the usual [walk order](walk-order.md):
 
 ```text
-.walkignore
 Mixed.Jpg
 docs/logo.svg
 docs/manual.pdf
@@ -81,7 +80,7 @@ Why?
 
 | Path                  | Result      | Why                                                                            |
 | -                     | -           | -                                                                              |
-| `.walkignore`         | Yielded     | Nothing matches it.                                                            |
+| `.walkignore`         | Ignored     | It's an ignore-file, and nothing re-includes it.                               |
 | `Mixed.Jpg`           | Yielded     | `*.jpg` and `*.JPG` don't match `.Jpg`.                                        |
 | `SCAN.PDF`            | Ignored     | `*.PDF` matches it.                                                            |
 | `archive.tar.gz`      | Ignored     | `*.gz` matches it.                                                             |

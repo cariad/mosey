@@ -108,8 +108,6 @@ walker = builder.build()
 ...yields these files when it walks the `root` directory, in the usual [walk order](walk-order.md):
 
 ```text
-.walkignore
-docs/.walkignore
 manual.pdf
 readme.md
 ```
@@ -118,10 +116,10 @@ Why?
 
 | Path               | Result  | Why                                                                                                    |
 | -                  | -       | -                                                                                                      |
-| `.walkignore`      | Yielded | Nothing matches it.                                                                                    |
+| `.walkignore`      | Ignored | It's an ignore-file, and nothing re-includes it.                                                       |
 | `backup.iso`       | Ignored | `*.iso` matches it.                                                                                    |
 | `docs/`            | Walked  | Nothing matches it.                                                                                    |
-| `docs/.walkignore` | Yielded | Nothing matches it.                                                                                    |
+| `docs/.walkignore` | Ignored | It's an ignore-file, and nothing re-includes it.                                                       |
 | `docs/guide.pdf`   | Ignored | `*.pdf` matches it.                                                                                    |
 | `docs/install.iso` | Ignored | `docs/.walkignore`'s `!*.iso` matches it, but `*.iso` weighs 1, so it overrules every ignore-file. |
 | `manual.pdf`       | Yielded | `*.pdf` matches it, but it weighs 0, so the root's `!manual.pdf` overrules it.                         |

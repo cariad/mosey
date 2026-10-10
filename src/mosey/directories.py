@@ -67,6 +67,7 @@ def read_directory(
     heavy_layers: Layers,
     layers: Layers,
     ignore_filename: str | None,
+    ignore_filename_layers: Layers,
 ) -> tuple[list[Candidate], Layers]:
     """Return a directory's candidates that aren't ignored, in walk order.
 
@@ -79,7 +80,9 @@ def read_directory(
     judge.
 
     The heavy layers judge each candidate before any of the others, so they overrule
-    every ignore-file.
+    every ignore-file. When the directory holds the ignore-file, the ignore-filename
+    layers judge after all the others, so they only leave out the ignore-file if nothing
+    else matches it.
 
     Args:
         directory: Path to the directory to read.
@@ -91,17 +94,23 @@ def read_directory(
             deepest first, then the layers for the patterns given in code that every
             ignore-file overrules.
         ignore_filename: The ignore-file's name, or `None` to read none.
+        ignore_filename_layers: The layers that leave out the ignore-file, or no layers
+            to yield it.
 
     Returns:
         The candidates that aren't ignored, in walk order, and the layers for the
         directory's subdirectories: this directory's own, if its ignore-file has any
-        rules, then `layers`. The heavy layers are never among them.
+        rules, then `layers`. Neither the heavy layers nor `ignore_filename_layers` are
+        ever among them.
 
     Raises:
         OSError: When the directory can't be listed, the type of an object within it
             can't be looked up, or the ignore-file can't be read.
     """
     candidates = list_candidates(directory)
+
+    # The layers that judge last of all, and only in this directory.
+    lowest: Layers = ()
 
     # We look for the ignore-file in the listing rather than trying to open it, so a
     # directory without one costs no extra system call. It also means the name has to
@@ -122,6 +131,23 @@ def read_directory(
         if rules is not None:
             layers = ((prefix, *rules), *layers)
 
+        # Leaving out the ignore-file ranks below every ignore-file and pattern, so its
+        # layers go behind all the others, whether or not the file has rules. They only
+        # match a file or symlink with exactly the ignore-file's name, and the only one
+        # is the ignore-file itself, so they'd change nothing in a directory without it.
+        # Like the heavy layers, they're never returned.
+        #
+        # NOTE: On Python 3.11 and 3.14 on arm64 macOS, leaving out the ignore-files
+        # NOTE: this way changed walks of 24,000 files in a virtual environment's
+        # NOTE: site-packages by under 2%, with no ignore-files or with 38. In a
+        # NOTE: generated tree of 23,000 files, with an ignore-file in each of its 1,111
+        # NOTE: directories, walks took 2.3-2.6% longer. A pattern for the name in the
+        # NOTE: light layers took 4-11% longer on 3.14, because every entry in every
+        # NOTE: directory was then judged. Judging only the ignore-file a second time,
+        # NOTE: with these layers last, cost about a third as much as this with an
+        # NOTE: ignore-file in every directory, but needs another scan of the listing.
+        lowest = ignore_filename_layers
+
     # The heavy layers go in front of every ignore-file's, but only for judging. They're
     # never returned with the other layers, so a subdirectory's ignore-file still goes
     # in front of the layers from the directories above, and behind the heavy layers.
@@ -130,7 +156,7 @@ def read_directory(
     # NOTE: passing them to `is_ignored` separately, or keeping them in front of the
     # NOTE: returned layers and adding each ignore-file's behind them: within 0.6% on
     # NOTE: Python 3.11 and 3.14 on arm64 macOS.
-    judging = heavy_layers + layers
+    judging = heavy_layers + layers + lowest
 
     if judging:
         candidates = [

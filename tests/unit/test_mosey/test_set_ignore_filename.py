@@ -49,16 +49,47 @@ def test_set_ignore_filename__not_a_filename(name: str) -> None:
     assert str(raised.value) == f"{name!r} isn't a filename"
 
 
-def test_set_ignore_filename__replaces(tmp_path: Path) -> None:
-    """Setting the ignore-file name again replaces the name set before."""
+def test_set_ignore_filename__refused_changes_nothing(tmp_path: Path) -> None:
+    """A refused name changes neither the name nor `ignore` set before it."""
+    make_tree(tmp_path, "x", "y")
+    (tmp_path / "ignore").write_bytes(b"x\n")
+
+    builder = Mosey()
+    builder.set_ignore_filename("ignore")
+
+    with raises(ValueError):
+        builder.set_ignore_filename("a/b", ignore=False)
+
+    walker = builder.build()
+
+    # "ignore" is still read and left out, so only "y" is yielded.
+    assert [step.relative_as_posix for step in walker.walk(tmp_path)] == ["y"]
+
+
+@mark.parametrize(
+    ("first", "second", "expect"),
+    [
+        param(True, True, ["a", "x"], id="left-out"),
+        param(False, True, ["a", "x"], id="left-out-after-yielded"),
+        param(True, False, ["a", "b", "x"], id="yielded-after-left-out"),
+    ],
+)
+def test_set_ignore_filename__replaces(
+    tmp_path: Path,
+    first: bool,
+    second: bool,
+    expect: list[str],
+) -> None:
+    """Setting the ignore-file name again replaces the name and `ignore` set before."""
     make_tree(tmp_path, "x", "y")
     (tmp_path / "a").write_bytes(b"x\n")
     (tmp_path / "b").write_bytes(b"y\n")
 
     builder = Mosey()
-    builder.set_ignore_filename("a")
-    builder.set_ignore_filename("b")
+    builder.set_ignore_filename("a", ignore=first)
+    builder.set_ignore_filename("b", ignore=second)
     walker = builder.build()
 
-    # Only "b" is read, so "x" is yielded and "y" isn't.
-    assert [step.relative_as_posix for step in walker.walk(tmp_path)] == ["a", "b", "x"]
+    # Only "b" is read, so "x" is yielded and "y" isn't, and "a" is a file like any
+    # other. "b" is left out only if the second call says so.
+    assert [step.relative_as_posix for step in walker.walk(tmp_path)] == expect

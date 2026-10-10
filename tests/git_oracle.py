@@ -76,6 +76,7 @@ def git_list_files(
     root: Path,
     ignore_filename: str | None,
     patterns: Sequence[tuple[str, int]] = (),
+    ignore_ignore_files: bool = True,
 ) -> list[str]:
     """Return the files beneath a directory that Git doesn't ignore.
 
@@ -89,6 +90,12 @@ def git_list_files(
     are sorted by weight, then those weighing 1 or more are given with `--exclude`, and
     the rest are written to a file for `--exclude-from`.
 
+    To leave out the ignore-files, as Mosey does by default, that file starts with the
+    ignore-file's name, which every ignore-file and pattern overrules. Then comes the
+    name with "!" before it and "/" after it, so that a directory with the name is still
+    walked. The name is written as it is, so it has to be one that a line matches
+    exactly, like "ignore".
+
     Each path is relative to `root` and uses "/" as its separator on every operating
     system, like `Step.relative_as_posix`. Git lists them in ascending byte order, which
     is also Mosey's walk order, so the two lists compare directly.
@@ -98,6 +105,8 @@ def git_list_files(
         ignore_filename: Name of the ignore-file to read in each directory, or `None` to
             read none.
         patterns: Each pattern and its weight, in the order they were added.
+        ignore_ignore_files: Whether to leave out the ignore-files. Only used with an
+            ignore-file name.
 
     Returns:
         The relative path of every file that Git doesn't ignore, in Git's order.
@@ -131,6 +140,10 @@ def git_list_files(
     heavy = [pattern for pattern, weight in ordered if weight > 0]
     light = [pattern for pattern, weight in ordered if weight <= 0]
     arguments.extend(f"--exclude={pattern}" for pattern in heavy)
+
+    # The first lines of the `--exclude-from` file rank below everything else.
+    if ignore_filename is not None and ignore_ignore_files:
+        light = [ignore_filename, f"!{ignore_filename}/", *light]
 
     path = None
 

@@ -4,7 +4,11 @@ from pathlib import Path
 
 from pytest import MonkeyPatch, mark, param, raises
 
-from tests.file_system_helpers import make_tree, skip_if_windows_cannot_create
+from tests.file_system_helpers import (
+    make_tree,
+    skip_if_windows_cannot_create,
+    skip_if_windows_git_warns,
+)
 from tests.git_oracle import git_list_files, has_git
 from tests.markers import needs_git, needs_posix_permissions
 
@@ -32,7 +36,8 @@ def test_git_list_files(tmp_path: Path, data: bytes, expect: list[str]) -> None:
     make_tree(tmp_path, "a.txt")
     (tmp_path / "ignore").write_bytes(data)
 
-    assert git_list_files(tmp_path, "ignore") == expect
+    # The ignore-file is listed unless a line ignores it, so these check its lines too.
+    assert git_list_files(tmp_path, "ignore", ignore_ignore_files=False) == expect
 
 
 @needs_git
@@ -76,6 +81,34 @@ def test_git_list_files__git(tmp_path: Path, path: str) -> None:
 
     with raises(ValueError):
         git_list_files(tmp_path, "ignore")
+
+
+@needs_git
+@mark.parametrize(
+    ("ignore_ignore_files", "expect"),
+    [
+        param(
+            True,
+            ["a", "dir/ignore/c", "sub/b"],
+            id="left-out",
+        ),
+        param(
+            False,
+            ["a", "dir/ignore/c", "ignore", "sub/b", "sub/ignore"],
+            id="listed",
+        ),
+    ],
+)
+def test_git_list_files__ignore_files(
+    tmp_path: Path,
+    ignore_ignore_files: bool,
+    expect: list[str],
+) -> None:
+    """Git leaves out the ignore-files if asked, but not a directory named like them."""
+    make_tree(tmp_path, "a", "ignore", "dir/ignore/c", "sub/b", "sub/ignore")
+    skip_if_windows_git_warns(tmp_path, "ignore")
+
+    assert git_list_files(tmp_path, "ignore", (), ignore_ignore_files) == expect
 
 
 @needs_git

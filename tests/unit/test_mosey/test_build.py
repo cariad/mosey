@@ -15,10 +15,10 @@ def test_build__later_changes(tmp_path: Path) -> None:
     builder = Mosey()
     builder.set_ignore_filename("a")
     walker = builder.build()
-    builder.set_ignore_filename("b")
+    builder.set_ignore_filename("b", ignore=False)
 
-    # The walker still reads "a", so "y" is yielded and "x" isn't.
-    assert [step.relative_as_posix for step in walker.walk(tmp_path)] == ["a", "b", "y"]
+    # The walker still reads and leaves out "a", so "y" is yielded and "x" isn't.
+    assert [step.relative_as_posix for step in walker.walk(tmp_path)] == ["b", "y"]
 
 
 def test_build__later_patterns(tmp_path: Path) -> None:

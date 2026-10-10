@@ -10,6 +10,7 @@ from mosey.rules import (
     Layer,
     Layers,
     Matcher,
+    compile_ignore_filename_layers,
     compile_root_layers,
     compile_rules,
     is_ignored,
@@ -76,6 +77,33 @@ def judge(case: RuleCase) -> bool:
     relative = case.entry.removesuffix("/")
     name = relative.rpartition("/")[2]
     return is_ignored(layers(case), name, relative, case.entry.endswith("/"))
+
+
+@mark.parametrize(
+    ("name", "other"),
+    [
+        param("ignore", "Ignore", id="plain"),
+        # Each of these names would match the other one, or not match itself, if it
+        # were read as a line of an ignore-file.
+        param("a*b", "axb", id="star"),
+        param("a?b", "axb", id="question-mark"),
+        param("[a]", "a", id="brackets"),
+        param("**", "a", id="double-star"),
+        param("!a", "a", id="exclamation-mark"),
+        param("#a", "a", id="hash"),
+        param("a ", "a", id="trailing-space"),
+    ],
+)
+def test_compile_ignore_filename_layers(name: str, other: str) -> None:
+    """The layers ignore every file with exactly the name, and nothing else."""
+    layers = compile_ignore_filename_layers(name)
+
+    assert is_ignored(layers, name, name, False)
+    assert is_ignored(layers, name, f"a/b/{name}", False)
+    assert not is_ignored(layers, other, other, False)
+
+    # A directory named like the ignore-file is walked like any other.
+    assert not is_ignored(layers, name, name, True)
 
 
 PRECEDENCE = [
