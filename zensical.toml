@@ -5,11 +5,13 @@ nav = [
   { "Walk order" = "walk-order.md" },
   { "Ignore-files" = "ignore-files.md" },
   { "Default and overriding patterns" = "default-and-overriding-patterns.md" },
+  { "Binary files" = "binary-files.md" },
   { "Unsupported configurations" = "unsupported.md" },
   { "API reference" = [
     { "Mosey" = "api/mosey.md" },
     { "Walker" = "api/walker.md" },
     { "Step" = "api/step.md" },
+    { "BINARY_FILE_PATTERNS" = "api/binary-file-patterns.md" },
   ] },
 ]
 repo_name = "cariad/mosey"
