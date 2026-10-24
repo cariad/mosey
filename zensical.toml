@@ -23,6 +23,12 @@ site_name = "Mosey documentation"
 site_url = "https://cariad.github.io/mosey/"
 strict = true
 
+# autorefs gives cross-reference links their tooltips. An internal link's tooltip would
+# name the internal module that defines the object (like `mosey.step.Step`), so only
+# external links get one.
+[project.plugins.autorefs]
+link_titles = "external"
+
 # mkdocstrings generates API references from docstrings.
 [project.plugins.mkdocstrings.handlers.python]
 inventories = [
