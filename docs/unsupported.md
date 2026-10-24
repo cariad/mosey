@@ -4,7 +4,7 @@ icon: lucide/ban
 
 # Unsupported configurations
 
-Every change to Mosey is tested on Linux, macOS and Windows, with Python 3.11, 3.12, 3.13 and 3.14.
+Every change to Mosey is tested on Linux, macOS and Windows, with Python 3.11, 3.12, 3.13, 3.14 and 3.15.
 
 A few rare configurations of those platforms aren't supported. Mosey might still work in them, but it isn't tested in them, and a bug report for these scenarios would need to be exceptionally compelling to be considered for fixing.
 

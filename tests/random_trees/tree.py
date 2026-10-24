@@ -51,7 +51,7 @@ def random_tree(
     """Make a random tree.
 
     The same arguments make the same tree on every operating system, and on Python 3.11
-    to 3.14. Python only promises that `random()` gives the same numbers from the same
+    to 3.15. Python only promises that `random()` gives the same numbers from the same
     seed, so a later version of Python might make different trees.
 
     A tree with patterns is the tree that the same seed and index make without them,
