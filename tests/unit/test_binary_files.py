@@ -24,7 +24,7 @@ def test_binary_file_patterns__check_pattern() -> None:
 
 def test_binary_file_patterns__docs() -> None:
     """The docs page lists exactly the same extensions, in order, and every name."""
-    # The Windows runners don't read files as UTF-8 by default.
+    # Before Python 3.15, the Windows runners don't read files as UTF-8 by default.
     page = PAGE.read_text(encoding="utf-8")
     formats = page.split("\n## Formats\n", 1)[1]
 

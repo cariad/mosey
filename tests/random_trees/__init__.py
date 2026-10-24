@@ -2,7 +2,7 @@
 
 `random_tree` makes a tree from a seed and an index, and `build` creates it. The same
 seed, index and options make the same tree on every operating system, and on Python 3.11
-to 3.14, so a tree that fails in CI can be rebuilt anywhere. Python only promises that
+to 3.15, so a tree that fails in CI can be rebuilt anywhere. Python only promises that
 `random()` gives the same numbers from the same seed, so a later version of Python might
 make different trees.
 

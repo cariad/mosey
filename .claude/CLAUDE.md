@@ -8,7 +8,7 @@ Mosey is a zero-dependency Python library (3.11 and later) that walks a director
 
 Everything runs through `uv` (its version is pinned in `pyproject.toml`) and `just`:
 
-- `just local` runs the local equivalents of CI's checks: markdown, docs, lint, typing, test and actions. CI also runs the tests on Linux, macOS and Windows with Python 3.11 to 3.14, and requires 100% coverage across those runs combined.
+- `just local` runs the local equivalents of CI's checks: markdown, docs, lint, typing, test and actions. CI also runs the tests on Linux, macOS and Windows with Python 3.11 to 3.15, and requires 100% coverage across those runs combined.
 - Build the docs with `uv run zensical build --clean` when checking links, because the cache can repeat the previous build's warnings.
 
 To run part of the suite, pass `--no-cov` straight after `pytest`:
