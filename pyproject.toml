@@ -131,9 +131,10 @@ br-spaces = 0 # Don't use trailing whitespace as line breaks
 strict = true # Check code blocks too
 
 [tool.uv]
+exclude-newer = "1 week"
 # NOTE: uv is pre-1.0 and minor releases may break our usage. Bump this deliberately
 # NOTE: after reading the changelog and testing.
-required-version = ">=0.12.7, <0.13"
+required-version = ">=0.13.5, <0.14"
 
 [tool.uv.extra-build-dependencies]
 # `actionlint-py` is published as a source distribution and `uv.lock` doesn't pin its
