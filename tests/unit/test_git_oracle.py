@@ -5,12 +5,15 @@ from pathlib import Path
 from pytest import MonkeyPatch, mark, param, raises
 
 from tests.file_system_helpers import (
+    make_broken_symlink,
+    make_symlink_to_directory,
+    make_symlink_to_file,
     make_tree,
     skip_if_windows_cannot_create,
     skip_if_windows_git_warns,
 )
 from tests.git_oracle import git_list_files, has_git
-from tests.markers import needs_git, needs_posix_permissions
+from tests.markers import needs_git, needs_posix_permissions, needs_symlinks
 
 
 @needs_git
@@ -109,6 +112,64 @@ def test_git_list_files__ignore_files(
     skip_if_windows_git_warns(tmp_path, "ignore")
 
     assert git_list_files(tmp_path, "ignore", (), ignore_ignore_files) == expect
+
+
+@needs_git
+@needs_symlinks
+@mark.parametrize(
+    (
+        "ignore_symlinks",
+        "expect",
+    ),
+    [
+        param(
+            False,
+            [
+                "a",
+                "broken",
+                "dlink",
+                "dlink.target/x",
+                "link",
+                "link.target",
+                "sub/link",
+                "sub/link.target",
+            ],
+            id="listed",
+        ),
+        param(
+            True,
+            [
+                "a",
+                "dlink.target/x",
+                "link.target",
+                "sub/link.target",
+            ],
+            id="left-out",
+        ),
+    ],
+)
+def test_git_list_files__ignore_symlinks(
+    tmp_path: Path,
+    ignore_symlinks: bool,
+    expect: list[str],
+) -> None:
+    """Git lists every symlink as a file, and leaves them all out if asked."""
+    make_tree(tmp_path, "a", "sub/")
+    make_broken_symlink(tmp_path / "broken")
+    make_symlink_to_directory(tmp_path / "dlink")
+    (tmp_path / "dlink.target" / "x").write_bytes(b"")
+    make_symlink_to_file(tmp_path / "link")
+    make_symlink_to_file(tmp_path / "sub" / "link")
+
+    files = git_list_files(
+        tmp_path,
+        None,
+        (),
+        True,
+        ignore_symlinks,
+    )
+
+    assert files == expect
 
 
 @needs_git

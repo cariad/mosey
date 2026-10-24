@@ -38,6 +38,9 @@ class Walker(Protocol):
         walk reaches the directory. The ignore-files themselves aren't yielded either,
         unless the name was set with `ignore=False`, or a pattern re-includes them.
 
+        When the walker ignores symlinks (set by
+        [`Mosey.ignore_symlinks`][mosey.Mosey.ignore_symlinks]), it yields none.
+
         A relative root is found from the working directory each time a subdirectory is
         read, so don't change the working directory during a walk.
 

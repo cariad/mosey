@@ -36,6 +36,7 @@ class MoseyStep:
 
     __slots__ = (
         "_path",
+        "is_symlink",
         "name",
         "relative_as_posix",
         "root",
@@ -46,6 +47,9 @@ class MoseyStep:
 
     `None` until it's constructed on-demand by the `path` property.
     """
+
+    is_symlink: Final[bool]
+    """Indicates whether or not the object is a symlink."""
 
     name: Final[str]
     """The object's filename."""
@@ -61,6 +65,8 @@ class MoseyStep:
         name: str,
         relative_as_posix: str,
         root: Path,
+        *,
+        is_symlink: bool = False,
     ) -> None:
         """Initialise a `MoseyStep`.
 
@@ -75,8 +81,10 @@ class MoseyStep:
             relative_as_posix: The object's path relative to `root` as a POSIX-style
                 string.
             root: The walk's root directory.
+            is_symlink: Whether or not the object is a symlink.
         """
         self._path = None
+        self.is_symlink = is_symlink
         self.name = name
         self.relative_as_posix = relative_as_posix
         self.root = root

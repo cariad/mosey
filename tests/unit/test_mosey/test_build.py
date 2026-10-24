@@ -3,7 +3,8 @@
 from pathlib import Path
 
 from mosey import Mosey
-from tests.file_system_helpers import make_tree
+from tests.file_system_helpers import make_symlink_to_file, make_tree
+from tests.markers import needs_symlinks
 
 
 def test_build__later_changes(tmp_path: Path) -> None:
@@ -19,6 +20,26 @@ def test_build__later_changes(tmp_path: Path) -> None:
 
     # The walker still reads and leaves out "a", so "y" is yielded and "x" isn't.
     assert [step.relative_as_posix for step in walker.walk(tmp_path)] == ["b", "y"]
+
+
+@needs_symlinks
+def test_build__later_ignore_symlinks(tmp_path: Path) -> None:
+    """Ignoring symlinks doesn't change the walkers a `Mosey` has already built."""
+    make_symlink_to_file(tmp_path / "link")
+
+    builder = Mosey()
+    walker = builder.build()
+    builder.ignore_symlinks()
+
+    # The walker still yields the symlink.
+    relative_paths = [step.relative_as_posix for step in walker.walk(tmp_path)]
+
+    expect = [
+        "link",
+        "link.target",
+    ]
+
+    assert relative_paths == expect
 
 
 def test_build__later_patterns(tmp_path: Path) -> None:

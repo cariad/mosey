@@ -98,7 +98,10 @@ def git_kept(
     make_tree(root, *case.tree)
 
     directory = root / case.directory
-    candidates = list_candidates(os.fspath(directory))
+
+    candidates = list_candidates(
+        os.fspath(directory),
+    )
 
     # Git only shows a directory through a file inside it. So each subdirectory gets an
     # ignore-file that keeps itself. A directory is never judged by its own ignore-file,
@@ -109,7 +112,7 @@ def git_kept(
     # though it's kept.
     write_ignore_files(
         directory,
-        {name: ["!/ignore"] for name, is_dir in candidates if is_dir},
+        {name: ["!/ignore"] for name, is_dir, _ in candidates if is_dir},
     )
 
     listed = git_list_files(root, "ignore", patterns, ignore_ignore_files)
@@ -118,8 +121,12 @@ def git_kept(
     # A file is kept when Git lists it, and a subdirectory when Git lists the
     # ignore-file inside it.
     kept = [
-        (name, is_dir)
-        for name, is_dir in candidates
+        (
+            name,
+            is_dir,
+            is_symlink,
+        )
+        for name, is_dir, is_symlink in candidates
         if (f"{prefix}{name}/ignore" if is_dir else prefix + name) in listed
     ]
 
@@ -150,7 +157,7 @@ def written(candidates: list[Candidate]) -> list[str]:
     Returns:
         Each candidate's name, with a "/" after a directory's.
     """
-    return [f"{name}/" if is_dir else name for name, is_dir in candidates]
+    return [f"{name}/" if is_dir else name for name, is_dir, _ in candidates]
 
 
 def read_case(
@@ -187,17 +194,31 @@ def read_case(
 
     for name in case.directory.split("/") if case.directory else []:
         candidates, layers = read_directory(
-            directory, prefix, heavy_layers, layers, "ignore", ignore_filename_layers
+            directory,
+            prefix,
+            heavy_layers,
+            layers,
+            "ignore",
+            ignore_filename_layers,
         )
 
         # A walk only reads a directory that its parent kept.
-        assert (name, True) in candidates
+        assert (
+            name,
+            True,  # Is a directory
+            False,  # Is a symlink
+        ) in candidates
 
         directory = os.path.join(directory, name)
         prefix += f"{name}/"
 
     candidates, layers = read_directory(
-        directory, prefix, heavy_layers, layers, "ignore", ignore_filename_layers
+        directory,
+        prefix,
+        heavy_layers,
+        layers,
+        "ignore",
+        ignore_filename_layers,
     )
     return written(candidates), prefixes(layers)
 
@@ -853,6 +874,13 @@ def test_read_directory__heavy_layers_git(
 
 @needs_symlinks
 @mark.parametrize(
+    "ignore_symlinks",
+    [
+        param(False, id="symlinks-kept"),
+        param(True, id="symlinks-ignored"),
+    ],
+)
+@mark.parametrize(
     ("make", "error"),
     [
         param(
@@ -878,13 +906,25 @@ def test_read_directory__ignore_file_cannot_be_read(
     tmp_path: Path,
     make: Callable[[Path], None],
     error: type[OSError],
+    ignore_symlinks: bool,
 ) -> None:
-    """An error reading the ignore-file rises unchanged, naming the ignore-file."""
+    """An error reading the ignore-file rises unchanged, naming the ignore-file.
+
+    Ignoring symlinks changes nothing, because a symlinked ignore-file is still read.
+    """
     make(tmp_path / "ignore")
     directory = os.fspath(tmp_path)
 
     with raises(error) as raised:
-        read_directory(directory, "", (), (), "ignore", ())
+        read_directory(
+            directory,
+            "",
+            (),
+            (),
+            "ignore",
+            (),
+            ignore_symlinks=ignore_symlinks,
+        )
 
     assert raised.value.filename == os.path.join(directory, "ignore")
 
@@ -894,11 +934,31 @@ def test_read_directory__ignore_file_differently_cased(tmp_path: Path) -> None:
     make_tree(tmp_path, "a")
     (tmp_path / "Ignore").write_bytes(b"a\n")
 
-    # macOS and Windows would open "Ignore" if asked for "ignore", and drop "a".
-    assert read_directory(os.fspath(tmp_path), "", (), (), "ignore", ()) == (
-        [("Ignore", False), ("a", False)],
+    candidates, layers = read_directory(
+        os.fspath(tmp_path),
+        "",
+        (),
+        (),
+        "ignore",
         (),
     )
+
+    # macOS and Windows would open "Ignore" if asked for "ignore", and drop "a".
+    expect = [
+        (
+            "Ignore",
+            False,  # Is a directory
+            False,  # Is a symlink
+        ),
+        (
+            "a",
+            False,  # Is a directory
+            False,  # Is a symlink
+        ),
+    ]
+
+    assert candidates == expect
+    assert layers == ()
 
 
 @needs_symlinks
@@ -907,12 +967,44 @@ def test_read_directory__ignore_file_differently_cased(tmp_path: Path) -> None:
     [
         param(
             b"*.log\n",
-            [("b", False), ("ignore", False), ("ignore.target", False)],
+            [
+                (
+                    "b",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+                (
+                    "ignore",
+                    False,  # Is a directory
+                    True,  # Is a symlink
+                ),
+                (
+                    "ignore.target",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+            ],
             id="rules-apply",
         ),
         param(
             b"ignore\n",
-            [("a.log", False), ("b", False), ("ignore.target", False)],
+            [
+                (
+                    "a.log",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+                (
+                    "b",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+                (
+                    "ignore.target",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+            ],
             id="drops-itself",
         ),
     ],
@@ -928,7 +1020,14 @@ def test_read_directory__ignore_file_is_symlink(
     symlink_target(path).write_bytes(data)
     make_tree(tmp_path, "a.log", "b")
 
-    candidates, layers = read_directory(os.fspath(tmp_path), "", (), (), "ignore", ())
+    candidates, layers = read_directory(
+        os.fspath(tmp_path),
+        "",
+        (),
+        (),
+        "ignore",
+        (),
+    )
 
     assert candidates == expect
     assert prefixes(layers) == [""]
@@ -936,7 +1035,43 @@ def test_read_directory__ignore_file_is_symlink(
 
 @needs_fifos
 @needs_symlinks
-def test_read_directory__ignore_file_is_symlink_to_fifo(tmp_path: Path) -> None:
+@mark.parametrize(
+    ("ignore_symlinks", "expect"),
+    [
+        param(
+            False,
+            [
+                (
+                    "a",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+                (
+                    "ignore",
+                    False,  # Is a directory
+                    True,  # Is a symlink
+                ),
+            ],
+            id="symlinks-kept",
+        ),
+        param(
+            True,
+            [
+                (
+                    "a",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                )
+            ],
+            id="symlinks-ignored",
+        ),
+    ],
+)
+def test_read_directory__ignore_file_is_symlink_to_fifo(
+    tmp_path: Path,
+    ignore_symlinks: bool,
+    expect: list[Candidate],
+) -> None:
     """A symlink to a FIFO adds no rules, without waiting for a writer."""
     path = tmp_path / "ignore"
     make_fifo(symlink_target(path))
@@ -946,11 +1081,19 @@ def test_read_directory__ignore_file_is_symlink_to_fifo(tmp_path: Path) -> None:
     # If the open waits for a writer, the alarm interrupts it, and the test fails rather
     # than hangs.
     with alarm(1, "Waited for the FIFO to be opened for writing"):
-        # The FIFO itself isn't a candidate.
-        assert read_directory(os.fspath(tmp_path), "", (), (), "ignore", ()) == (
-            [("a", False), ("ignore", False)],
+        candidates, layers = read_directory(
+            os.fspath(tmp_path),
+            "",
             (),
+            (),
+            "ignore",
+            (),
+            ignore_symlinks=ignore_symlinks,
         )
+
+    # The FIFO itself isn't a candidate.
+    assert candidates == expect
+    assert layers == ()
 
 
 def test_read_directory__ignore_filename(tmp_path: Path) -> None:
@@ -959,9 +1102,27 @@ def test_read_directory__ignore_filename(tmp_path: Path) -> None:
     make_tree(tmp_path, "a", "b")
     (tmp_path / "rules").write_bytes(b"a\n")
 
-    candidates, layers = read_directory(os.fspath(tmp_path), "", (), (), "rules", ())
+    candidates, layers = read_directory(
+        os.fspath(tmp_path),
+        "",
+        (),
+        (),
+        "rules",
+        (),
+    )
 
-    assert candidates == [("b", False), ("rules", False)]
+    assert candidates == [
+        (
+            "b",
+            False,  # Is a directory
+            False,  # Is a symlink
+        ),
+        (
+            "rules",
+            False,  # Is a directory
+            False,  # Is a symlink
+        ),
+    ]
     assert prefixes(layers) == [""]
 
 
@@ -1044,15 +1205,201 @@ def test_read_directory__ignore_filename_layers_only_beside_ignore_file(
     everything = compile_root_layers(["*"])
     make_tree(tmp_path, "a", "sub/b", "sub/ignore")
 
-    assert read_directory(os.fspath(tmp_path), "", (), (), "ignore", everything) == (
-        [("a", False), ("sub", True)],
+    candidates, layers = read_directory(
+        os.fspath(tmp_path),
+        "",
         (),
+        (),
+        "ignore",
+        everything,
     )
 
+    expect = [
+        (
+            "a",
+            False,  # Is a directory
+            False,  # Is a symlink
+        ),
+        (
+            "sub",
+            True,  # Is a directory
+            False,  # Is a symlink
+        ),
+    ]
+
+    assert candidates == expect
+    assert layers == ()
+
     # "sub" holds the ignore-file, so they judge there, but they're never returned.
-    assert read_directory(
-        os.fspath(tmp_path / "sub"), "sub/", (), (), "ignore", everything
-    ) == ([], ())
+    sub_candidates, sub_layers = read_directory(
+        os.fspath(tmp_path / "sub"),
+        "sub/",
+        (),
+        (),
+        "ignore",
+        everything,
+    )
+
+    assert sub_candidates == []
+    assert sub_layers == ()
+
+
+@needs_symlinks
+def test_read_directory__ignore_symlinks(tmp_path: Path) -> None:
+    """When symlinks are ignored, no line or pattern can re-include one."""
+    make_tree(tmp_path, "a")
+    make_symlink_to_file(tmp_path / "link")
+    write_ignore_files(tmp_path, {"": ["!link"]})
+
+    candidates, _ = read_directory(
+        os.fspath(tmp_path),
+        "",
+        compile_root_layers(["!link"]),
+        compile_root_layers(["!link"]),
+        "ignore",
+        (),
+        ignore_symlinks=True,
+    )
+
+    assert candidates == [
+        (
+            "a",
+            False,  # Is a directory
+            False,  # Is a symlink
+        ),
+        (
+            "ignore",
+            False,  # Is a directory
+            False,  # Is a symlink
+        ),
+        (
+            "link.target",
+            False,  # Is a directory
+            False,  # Is a symlink
+        ),
+    ]
+
+
+@needs_symlinks
+@mark.parametrize(
+    ("data", "heavy", "ignore_ignore_files", "expect", "expect_prefixes"),
+    [
+        param(
+            b"*.log\n",
+            [],
+            False,
+            [
+                (
+                    "b",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+                (
+                    "ignore.target",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+            ],
+            [""],
+            id="rules-apply",
+        ),
+        param(
+            b"*.log\n",
+            [],
+            True,
+            [
+                (
+                    "b",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+                (
+                    "ignore.target",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+            ],
+            [""],
+            id="rules-apply-leaving-out-ignore-files",
+        ),
+        param(
+            b"!ignore\n",
+            [],
+            True,
+            [
+                (
+                    "a.log",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+                (
+                    "b",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+                (
+                    "ignore.target",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+            ],
+            [""],
+            id="own-line-cannot-re-include",
+        ),
+        param(
+            b"",
+            ["!ignore"],
+            True,
+            [
+                (
+                    "a.log",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+                (
+                    "b",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+                (
+                    "ignore.target",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+            ],
+            [],
+            id="heavy-pattern-cannot-re-include",
+        ),
+    ],
+)
+def test_read_directory__ignore_symlinks_ignore_file(
+    tmp_path: Path,
+    data: bytes,
+    heavy: list[str],
+    ignore_ignore_files: bool,
+    expect: list[Candidate],
+    expect_prefixes: list[str],
+) -> None:
+    """When symlinks are ignored, a symlinked ignore-file is read, then left out."""
+    path = tmp_path / "ignore"
+    make_symlink_to_file(path)
+    symlink_target(path).write_bytes(data)
+    make_tree(tmp_path, "a.log", "b")
+
+    candidates, layers = read_directory(
+        os.fspath(tmp_path),
+        "",
+        compile_root_layers(heavy),
+        (),
+        "ignore",
+        compile_ignore_filename_layers("ignore") if ignore_ignore_files else (),
+        ignore_symlinks=True,
+    )
+
+    layer_prefixes = prefixes(layers)
+
+    assert candidates == expect
+    assert layer_prefixes == expect_prefixes
 
 
 # The light layers judge each candidate after every ignore-file, and stay last in the
@@ -1158,14 +1505,41 @@ def test_read_directory__light_layers_git(
         param(
             make_symlink_to_directory,
             ["foo/"],
-            [("foo", False), ("foo.target", True), ("ignore", False)],
+            [
+                (
+                    "foo",
+                    False,  # Is a directory
+                    True,  # Is a symlink
+                ),
+                (
+                    "foo.target",
+                    True,  # Is a directory
+                    False,  # Is a symlink
+                ),
+                (
+                    "ignore",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+            ],
             marks=needs_symlinks,
             id="symlink-directory-only-line",
         ),
         param(
             make_symlink_to_directory,
             ["foo"],
-            [("foo.target", True), ("ignore", False)],
+            [
+                (
+                    "foo.target",
+                    True,  # Is a directory
+                    False,  # Is a symlink
+                ),
+                (
+                    "ignore",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+            ],
             marks=needs_symlinks,
             id="symlink-any-line",
         ),
@@ -1173,7 +1547,18 @@ def test_read_directory__light_layers_git(
         param(
             make_junction,
             ["foo/"],
-            [("foo.target", True), ("ignore", False)],
+            [
+                (
+                    "foo.target",
+                    True,  # Is a directory
+                    False,  # Is a symlink
+                ),
+                (
+                    "ignore",
+                    False,  # Is a directory
+                    False,  # Is a symlink
+                ),
+            ],
             marks=needs_junctions,
             id="junction-directory-only-line",
         ),
@@ -1189,7 +1574,14 @@ def test_read_directory__link_to_directory(
     make(tmp_path / "foo")
     write_ignore_files(tmp_path, {"": lines})
 
-    candidates, _ = read_directory(os.fspath(tmp_path), "", (), (), "ignore", ())
+    candidates, _ = read_directory(
+        os.fspath(tmp_path),
+        "",
+        (),
+        (),
+        "ignore",
+        (),
+    )
 
     assert candidates == expect
 
@@ -1205,10 +1597,31 @@ def test_read_directory__no_ignore_filename(tmp_path: Path) -> None:
     light_layers = compile_root_layers(["*.log"])
 
     candidates, layers = read_directory(
-        os.fspath(tmp_path), "", heavy_layers, light_layers, None, ()
+        os.fspath(tmp_path),
+        "",
+        heavy_layers,
+        light_layers,
+        None,
+        (),
     )
 
-    assert candidates == [("b", False), ("ignore", False), ("keep.log", False)]
+    assert candidates == [
+        (
+            "b",
+            False,  # Is a directory
+            False,  # Is a symlink
+        ),
+        (
+            "ignore",
+            False,  # Is a directory
+            False,  # Is a symlink
+        ),
+        (
+            "keep.log",
+            False,  # Is a directory
+            False,  # Is a symlink
+        ),
+    ]
 
     # Returned as they were given, without the heavy layers.
     assert layers is light_layers
@@ -1226,7 +1639,14 @@ def test_read_directory__read_is_denied(tmp_path: Path) -> None:
 
     try:
         with raises(PermissionError) as raised:
-            read_directory(directory, "", (), (), "ignore", ())
+            read_directory(
+                directory,
+                "",
+                (),
+                (),
+                "ignore",
+                (),
+            )
 
         assert raised.value.errno == errno.EACCES
         assert raised.value.filename == os.path.join(directory, "ignore")
@@ -1248,7 +1668,14 @@ def test_read_directory__search_is_denied(tmp_path: Path) -> None:
 
     try:
         with raises(PermissionError) as raised:
-            read_directory(directory, "sub/", (), (), "ignore", ())
+            read_directory(
+                directory,
+                "sub/",
+                (),
+                (),
+                "ignore",
+                (),
+            )
 
         assert raised.value.errno == errno.EACCES
         assert raised.value.filename == os.path.join(directory, "ignore")
@@ -1263,7 +1690,14 @@ def test_read_directory__search_is_denied_without_ignore_file(tmp_path: Path) ->
     make_tree(tmp_path, "sub/a", "sub/b/", "sub/c.log", "sub/d/")
     write_ignore_files(tmp_path, {"": ["*.log", "b/"]})
     path = tmp_path / "sub"
-    _, layers = read_directory(os.fspath(tmp_path), "", (), (), "ignore", ())
+    _, layers = read_directory(
+        os.fspath(tmp_path),
+        "",
+        (),
+        (),
+        "ignore",
+        (),
+    )
 
     # Read and write but not search ("execute"), so nothing inside the directory can be
     # looked up by its path. Opening the ignore-file would raise, and looking up "b"
@@ -1272,10 +1706,26 @@ def test_read_directory__search_is_denied_without_ignore_file(tmp_path: Path) ->
 
     try:
         candidates, layers = read_directory(
-            os.fspath(path), "sub/", (), layers, "ignore", ()
+            os.fspath(path),
+            "sub/",
+            (),
+            layers,
+            "ignore",
+            (),
         )
 
-        assert candidates == [("a", False), ("d", True)]
+        assert candidates == [
+            (
+                "a",
+                False,  # Is a directory
+                False,  # Is a symlink
+            ),
+            (
+                "d",
+                True,  # Is a directory
+                False,  # Is a symlink
+            ),
+        ]
         assert prefixes(layers) == [""]
     finally:
         # Restore access so pytest can clean up `tmp_path`.

@@ -40,6 +40,7 @@ class Mosey:
     __slots__ = (
         "_ignore_filename",
         "_ignore_ignore_files",
+        "_ignore_symlinks",
         "_patterns",
     )
 
@@ -52,6 +53,9 @@ class Mosey:
     Only read when `_ignore_filename` isn't `None`.
     """
 
+    _ignore_symlinks: bool
+    """Whether the walk ignores symlinks, so that it never yields them."""
+
     _patterns: tuple[tuple[int, str], ...]
     """Each pattern given in code, after its weight, in the order they were added.
 
@@ -62,6 +66,7 @@ class Mosey:
         """Initialise a `Mosey` describing a walk with no ignore-files or patterns."""
         self._ignore_filename = None
         self._ignore_ignore_files = True
+        self._ignore_symlinks = False
         self._patterns = ()
 
     def add_pattern(
@@ -115,6 +120,17 @@ class Mosey:
             *self._patterns,
             *((weight, pattern) for pattern in BINARY_FILE_PATTERNS),
         )
+
+    def ignore_symlinks(self) -> None:
+        """Ignore symlinks, so that the walk never yields them.
+
+        No line or pattern can re-include an ignored symlink, whatever it points to, as
+        documented at [symlinks][symlinks]. The walk still reads a symlinked
+        [ignore-file][ignore-files] through the link.
+
+        Calling this again changes nothing.
+        """
+        self._ignore_symlinks = True
 
     def set_ignore_filename(
         self,
@@ -182,5 +198,6 @@ class Mosey:
                 if name is not None and self._ignore_ignore_files
                 else ()
             ),
+            ignore_symlinks=self._ignore_symlinks,
             light_layers=compile_root_layers([p for w, p in patterns if w <= 0]),
         )

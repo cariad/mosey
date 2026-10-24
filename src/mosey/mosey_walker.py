@@ -31,6 +31,7 @@ class MoseyWalker:
         "_heavy_layers",
         "_ignore_filename",
         "_ignore_filename_layers",
+        "_ignore_symlinks",
         "_judges",
         "_light_layers",
     )
@@ -47,6 +48,9 @@ class MoseyWalker:
     They judge after every other layer, and only in a directory that holds the
     ignore-file."""
 
+    _ignore_symlinks: Final[bool]
+    """Whether the walk ignores symlinks, so that it never yields them."""
+
     _judges: Final[bool]
     """Whether the walk judges any entries: `True` if it reads ignore-files or has any
     patterns given in code."""
@@ -60,6 +64,7 @@ class MoseyWalker:
         heavy_layers: Layers,
         ignore_filename: str | None,
         ignore_filename_layers: Layers,
+        ignore_symlinks: bool,
         light_layers: Layers,
     ) -> None:
         """Initialise a `MoseyWalker`.
@@ -74,12 +79,15 @@ class MoseyWalker:
                 none.
             ignore_filename_layers: The layers that leave out the ignore-files
                 themselves, or no layers to yield them.
+            ignore_symlinks: Whether the walk ignores symlinks, so that it never yields
+                them.
             light_layers: The layers for the patterns given in code that every
                 ignore-file overrules.
         """
         self._heavy_layers = heavy_layers
         self._ignore_filename = ignore_filename
         self._ignore_filename_layers = ignore_filename_layers
+        self._ignore_symlinks = ignore_symlinks
         self._light_layers = light_layers
 
         self._judges = (
@@ -140,9 +148,15 @@ class MoseyWalker:
                 self._light_layers,
                 self._ignore_filename,
                 self._ignore_filename_layers,
+                ignore_symlinks=self._ignore_symlinks,
             )
         else:
-            root_candidates, root_layers = list_candidates(root_str), ()
+            root_candidates = list_candidates(
+                root_str,
+                ignore_symlinks=self._ignore_symlinks,
+            )
+
+            root_layers = ()
 
         stack = [(root_str, "", iter(root_candidates), root_layers)]
 
@@ -155,7 +169,7 @@ class MoseyWalker:
         while stack:
             directory, prefix, candidates, layers = stack[-1]
 
-            for name, is_dir in candidates:
+            for name, is_dir, is_symlink in candidates:
                 if is_dir:
                     path = os.path.join(directory, name)
                     path_prefix = prefix + name + "/"
@@ -170,9 +184,15 @@ class MoseyWalker:
                             layers,
                             self._ignore_filename,
                             self._ignore_filename_layers,
+                            ignore_symlinks=self._ignore_symlinks,
                         )
                     else:
-                        path_candidates, path_layers = list_candidates(path), layers
+                        path_candidates = list_candidates(
+                            path,
+                            ignore_symlinks=self._ignore_symlinks,
+                        )
+
+                        path_layers = layers
 
                     # Add this subdirectory to the stack...
                     stack.append(
@@ -186,7 +206,12 @@ class MoseyWalker:
                     # the subdirectory.
                     break
 
-                yield MoseyStep(name, prefix + name, root)
+                yield MoseyStep(
+                    name,
+                    prefix + name,
+                    root,
+                    is_symlink=is_symlink,
+                )
 
             else:
                 # We're done with this directory.

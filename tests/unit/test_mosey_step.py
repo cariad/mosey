@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pytest import fixture
+from pytest import fixture, mark
 
 from mosey.mosey_step import MoseyStep
 
@@ -15,6 +15,24 @@ def step() -> MoseyStep:
         "documents/foo.txt",
         Path("stuff"),
     )
+
+
+@mark.parametrize("is_symlink", [False, True])
+def test_is_symlink(is_symlink: bool) -> None:
+    """Whether it's a symlink is assigned during initialisation."""
+    step = MoseyStep(
+        "link",
+        "documents/link",
+        Path("stuff"),
+        is_symlink=is_symlink,
+    )
+
+    assert step.is_symlink is is_symlink
+
+
+def test_is_symlink__default(step: MoseyStep) -> None:
+    """A step isn't a symlink unless it's said to be."""
+    assert step.is_symlink is False
 
 
 def test_name(step: MoseyStep) -> None:

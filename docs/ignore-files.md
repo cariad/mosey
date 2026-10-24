@@ -138,7 +138,7 @@ Why?
 - **A nearer ignore-file beats a `!` further up.** If the root's ignore-file holds `*.log` then `!keep.log`, and `sub/.walkignore` holds `*.log`, then `sub/keep.log` is ignored.
 - **A broken line matches nothing, and the rest of the file still applies.** That's a line with a `[` that nothing closes, like `[abc.txt` (which doesn't even match a file named `[abc.txt`), an unknown class, like `[[:letter:]]`, or a path that would need tidying up, like `./todo.txt` or `docs//todo.txt`.
 - **The filename must match exactly.** A file named `.WALKIGNORE` isn't read as `.walkignore`, or skipped like one, even on macOS and Windows. A directory named `.walkignore` is walked like any other directory.
-- **A symlinked ignore-file is read through the link.** Mosey skips the symlink like any other ignore-file, and judges the file it points to by its own name and path, like any other file.
+- **A symlinked ignore-file is read through the link.** Mosey skips the symlink like any other ignore-file, and judges the file it points to by its own name and path, like any other file. For what changes when the walker ignores symlinks, see [symlinks](symlinks.md).
 - **A broad `!` line re-includes ignore-files too.** `!*` and `!.*` match `.walkignore`, so they re-include it along with everything else they match.
 - **An ignore-file is read once per walk**, when the walk reaches its directory, so editing it after that makes no difference until the next walk.
 - **An ignore-file that can't be read stops the walk.** The walk raises an `OSError` naming it, for example when permissions deny reading it, or it's a broken symlink.
