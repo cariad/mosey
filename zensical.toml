@@ -6,6 +6,7 @@ nav = [
   { "Ignore-files" = "ignore-files.md" },
   { "Default and overriding patterns" = "default-and-overriding-patterns.md" },
   { "Binary files" = "binary-files.md" },
+  { "Symlinks" = "symlinks.md" },
   { "Unsupported configurations" = "unsupported.md" },
   { "API reference" = [
     { "Mosey" = "api/mosey.md" },

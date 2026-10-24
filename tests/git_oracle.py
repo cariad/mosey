@@ -77,6 +77,7 @@ def git_list_files(
     ignore_filename: str | None,
     patterns: Sequence[tuple[str, int]] = (),
     ignore_ignore_files: bool = True,
+    ignore_symlinks: bool = False,
 ) -> list[str]:
     """Return the files beneath a directory that Git doesn't ignore.
 
@@ -96,6 +97,12 @@ def git_list_files(
     walked. The name is written as it is, so it has to be one that a line matches
     exactly, like "ignore".
 
+    Git has no way to leave out symlinks, so to ignore them, the symlinks are dropped
+    from Git's listing afterwards. Git lists a symlink as a file, whatever it points to,
+    and never lists anything beneath one, so that leaves exactly what a walk that
+    ignores symlinks yields. Git refuses to read a symlinked ignore-file, though, and
+    warns, so a tree that holds one can't be compared either way.
+
     Each path is relative to `root` and uses "/" as its separator on every operating
     system, like `Step.relative_as_posix`. Git lists them in ascending byte order, which
     is also Mosey's walk order, so the two lists compare directly.
@@ -107,6 +114,7 @@ def git_list_files(
         patterns: Each pattern and its weight, in the order they were added.
         ignore_ignore_files: Whether to leave out the ignore-files. Only used with an
             ignore-file name.
+        ignore_symlinks: Whether to leave out the symlinks.
 
     Returns:
         The relative path of every file that Git doesn't ignore, in Git's order.
@@ -175,7 +183,12 @@ def git_list_files(
 
     # `-z` gives every name exactly, rather than quoting unusual ones, and ends each one
     # with a zero byte. So the last item after splitting is empty.
-    return [os.fsdecode(path) for path in output.split(b"\0")[:-1]]
+    listed = [os.fsdecode(path) for path in output.split(b"\0")[:-1]]
+
+    if ignore_symlinks:
+        return [path for path in listed if not os.path.islink(root / path)]
+
+    return listed
 
 
 @cache

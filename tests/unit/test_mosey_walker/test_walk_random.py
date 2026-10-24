@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pytest import fail
 
-from tests.file_system_helpers import relative_paths, symlinks_allowed
+from tests.file_system_helpers import build_walker, relative_paths, symlinks_allowed
 from tests.git_oracle import git_list_files, git_repository
 from tests.markers import needs_git
 from tests.random_trees import RandomTree, build, random_tree
@@ -33,24 +33,96 @@ TREES_WITH_PATTERNS = 100
 """How many random trees with patterns to compare."""
 
 
-def describe(made: str, case: RandomTree, listed: list[str], walked: list[str]) -> str:
+def check(
+    made: str,
+    case: RandomTree,
+    root: Path,
+    listed: list[str],
+) -> None:
+    """Check that a walk of a random tree yields what Git lists, symlinks and all.
+
+    The tree is walked twice: once as it is, when each step must say whether it's one
+    of the tree's symlinks, and once ignoring symlinks, when the walk must yield what
+    Git lists apart from them.
+
+    Args:
+        made: The call that makes the tree.
+        case: The tree.
+        root: Path to the tree.
+        listed: What Git lists.
+    """
+    try:
+        steps = list(build_walker(case.ignore_filename, case.patterns).walk(root))
+
+        ignoring = relative_paths(
+            root,
+            case.ignore_filename,
+            case.patterns,
+            ignore_symlinks=True,
+        )
+
+    except Exception as error:
+        error.add_note(f"{made} made this tree:\n{case!r}")
+        raise
+
+    walked = [step.relative_as_posix for step in steps]
+
+    if walked != listed:
+        fail(describe(made, case, listed, walked), pytrace=False)
+
+    flagged = [step.relative_as_posix for step in steps if step.is_symlink]
+    symlinks = [path for path in walked if path in case.symlinks]
+
+    if flagged != symlinks:
+        fail(
+            f"{made} flags symlinks differently:\n{case!r}\n"
+            f"Flagged: {flagged!r}\nSymlinks: {symlinks!r}",
+            pytrace=False,
+        )
+
+    # Git never lists anything beneath a symlink, so leaving out the symlinks it lists
+    # leaves what a walk that ignores them yields.
+    kept = [path for path in listed if path not in case.symlinks]
+
+    if ignoring != kept:
+        fail(
+            describe(
+                made,
+                case,
+                kept,
+                ignoring,
+                ignore_symlinks=True,
+            ),
+            pytrace=False,
+        )
+
+
+def describe(
+    made: str,
+    case: RandomTree,
+    listed: list[str],
+    walked: list[str],
+    ignore_symlinks: bool = False,
+) -> str:
     """Describe a tree that Git and the walk list differently.
 
     Args:
         made: The call that makes the tree.
         case: The tree.
-        listed: What Git lists.
+        listed: What Git lists, without the symlinks when the walk ignores them.
         walked: What the walk yields.
+        ignore_symlinks: Whether the walk ignores symlinks.
 
     Returns:
         The description.
     """
     only_listed = [path for path in listed if path not in walked]
     only_walked = [path for path in walked if path not in listed]
+    ignoring = ", ignoring symlinks" if ignore_symlinks else ""
 
     return "\n".join(
         [
-            f"{made} lists differently:",
+            f"{made} lists differently{ignoring}:",
             repr(case),
             f"Only Git lists: {only_listed!r}",
             f"Only the walk yields: {only_walked!r}",
@@ -100,17 +172,12 @@ def test_walk__random_trees(tmp_path: Path) -> None:
             f"ignore_directories={ignore_directories}, patterns=False)"
         )
 
-        root = tmp_path / str(index)
-        listed = listings.get(str(index), [])
-
-        try:
-            walked = relative_paths(root, "ignore")
-        except Exception as error:
-            error.add_note(f"{made} made this tree:\n{case!r}")
-            raise
-
-        if walked != listed:
-            fail(describe(made, case, listed, walked), pytrace=False)
+        check(
+            made,
+            case,
+            tmp_path / str(index),
+            listings.get(str(index), []),
+        )
 
 
 @needs_git
@@ -158,14 +225,15 @@ def test_walk__random_trees_with_patterns(tmp_path: Path) -> None:
             f"ignore_directories={ignore_directories}, patterns=True)"
         )
 
-        root = tmp_path / str(index)
-
         try:
             listed = listing.result()
-            walked = relative_paths(root, case.ignore_filename, case.patterns)
         except Exception as error:
             error.add_note(f"{made} made this tree:\n{case!r}")
             raise
 
-        if walked != listed:
-            fail(describe(made, case, listed, walked), pytrace=False)
+        check(
+            made,
+            case,
+            tmp_path / str(index),
+            listed,
+        )

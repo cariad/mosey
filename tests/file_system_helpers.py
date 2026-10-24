@@ -17,6 +17,7 @@ def build_walker(
     ignore_filename: str | None = None,
     patterns: Sequence[tuple[str, int]] = (),
     ignore_ignore_files: bool = True,
+    ignore_symlinks: bool = False,
 ) -> Walker:
     """Build a walker with the public builder.
 
@@ -26,6 +27,8 @@ def build_walker(
         ignore_ignore_files: Whether the walk leaves out the ignore-files, as
             `Mosey.set_ignore_filename` takes `ignore`. Only used with an ignore-file
             name.
+        ignore_symlinks: Whether the walk ignores symlinks, as
+            `Mosey.ignore_symlinks` asks.
 
     Returns:
         The walker.
@@ -37,6 +40,9 @@ def build_walker(
 
     for pattern, weight in patterns:
         builder.add_pattern(pattern, weight=weight)
+
+    if ignore_symlinks:
+        builder.ignore_symlinks()
 
     return builder.build()
 
@@ -346,6 +352,7 @@ def relative_paths(
     ignore_filename: str | None = None,
     patterns: Sequence[tuple[str, int]] = (),
     ignore_ignore_files: bool = True,
+    ignore_symlinks: bool = False,
 ) -> list[str]:
     """Walk a directory and return every step's relative path, in order.
 
@@ -356,11 +363,19 @@ def relative_paths(
         ignore_ignore_files: Whether the walk leaves out the ignore-files, as
             `Mosey.set_ignore_filename` takes `ignore`. Only used with an ignore-file
             name.
+        ignore_symlinks: Whether the walk ignores symlinks, as
+            `Mosey.ignore_symlinks` asks.
 
     Returns:
         The relative path of every step.
     """
-    walker = build_walker(ignore_filename, patterns, ignore_ignore_files)
+    walker = build_walker(
+        ignore_filename,
+        patterns,
+        ignore_ignore_files,
+        ignore_symlinks,
+    )
+
     return [step.relative_as_posix for step in walker.walk(root)]
 
 

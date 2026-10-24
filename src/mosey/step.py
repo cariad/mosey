@@ -19,6 +19,17 @@ class Step(Protocol):
     """
 
     @property
+    def is_symlink(self) -> bool:
+        """Whether the object is a symlink.
+
+        Fast to read. It describes the object itself, as it was when the walk listed its
+        directory, and never what the object points to. It's always `False` when the
+        walker [ignores symlinks][mosey.Mosey.ignore_symlinks], as documented at
+        [symlinks][symlinks].
+        """
+        ...
+
+    @property
     def name(self) -> str:
         """The object's filename.
 
