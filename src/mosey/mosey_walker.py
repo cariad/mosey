@@ -12,9 +12,11 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Final, final
 
-from .directories import list_candidates, read_directory
+from .candidate import Candidate
+from .directories import find_directory, list_candidates, read_directory
 from .exceptions import raise_file_not_found
 from .mosey_step import MoseyStep
+from .paths import split_start
 from .rules import Layers
 from .step import Step
 
@@ -94,19 +96,34 @@ class MoseyWalker:
             ignore_filename is not None or bool(heavy_layers) or bool(light_layers)
         )
 
-    def _iterate(self, root: Path) -> Iterator[Step]:
+    def _iterate(
+        self,
+        root: Path,
+        names: tuple[str, ...],
+        identities: list[os.stat_result],
+    ) -> Iterator[Step]:
         """Walk a directory and yield a `Step` for every file that isn't ignored.
 
         The walk is depth-first and yields files in the walk order documented at
         https://cariad.github.io/mosey/walk-order/.
 
-        The directory is expected to have been validated before calling.
+        The directory, and the directory to start in, are expected to have been
+        validated before calling.
 
         Args:
             root: Path to the directory to walk.
+            names: The names of the directories to pass through to reach the directory
+                to start in, outermost first.
+
+                For example, `("a", "b")` starts in "root/a/b".
+
+                An empty tuple starts in `root` itself.
+
+            identities: The result of `os.lstat` for each directory in `names`, in the
+                same order.
 
         Yields:
-            A `Step` for every file beneath `root` that isn't ignored.
+            A `Step` for every file that isn't ignored.
         """
         # The walk keeps its own stack of directories rather than recursing. A recursive
         # generator would pass every file up through one `yield from` per level, so the
@@ -116,8 +133,11 @@ class MoseyWalker:
         # holds:
         #
         #  - The directory's path, for listing its subdirectories.
-        #  - The directory's path relative to the root, as a POSIX-style prefix for its
-        #    entries: "" for the root, or "a/b/" for "root/a/b".
+        #  - The directory's path relative to the root, as a POSIX-style prefix for
+        #    judging its entries: "" for the root, or "a/b/" for "root/a/b".
+        #  - The same prefix for its steps. The names in `names` are spelled as the
+        #    caller spelled them, which can differ from the file system's spelling,
+        #    like "A/" for "a/" on a case-insensitive file system.
         #  - An iterator over the directory's remaining candidates. It has to be an
         #    iterator rather than the list itself, so that the `for` loop below resumes
         #    where it left off instead of starting the list again.
@@ -130,35 +150,55 @@ class MoseyWalker:
         # changes what gets walked. We don't guard against that: each step's path
         # starts with the same relative root, so it would point into the new directory
         # anyway. `os.walk` behaves the same way.
-        root_str = os.fspath(root)
+        #
+        # NOTE: On Python 3.14 on arm64 macOS, carrying the step prefix in each frame,
+        # NOTE: beside the prefix for judging, changed walks of 24,000 files in a
+        # NOTE: virtual environment's site-packages, with an ignore-file name, by under
+        # NOTE: 0.5%: within the noise between runs.
+        directory = os.fspath(root)
+        prefix = ""
 
-        # NOTE: We check whether the walk judges anything here and for every
-        # NOTE: subdirectory below, rather than keep a second copy of the loop for walks
-        # NOTE: that don't. On Python 3.11 to 3.14 on arm64 macOS, a walk with no name
-        # NOTE: or patterns took 0-0.6% longer than before ignore-files, and a walk with
-        # NOTE: a name that no file in the tree has took 0.6-1.4% longer. Adding
-        # NOTE: default and overriding patterns changed neither: within 0.2%.
-        if self._judges:
-            # The light layers start the walk's layers, so each ignore-file's layer goes
-            # in front of them, and every ignore-file overrules them.
-            root_candidates, root_layers = read_directory(
-                root_str,
-                "",
-                self._heavy_layers,
-                self._light_layers,
-                self._ignore_filename,
-                self._ignore_filename_layers,
-                ignore_symlinks=self._ignore_symlinks,
+        # The light layers start the walk's layers, so each ignore-file's layer goes in
+        # front of them, and every ignore-file overrules them.
+        candidates, layers = self._read_directory(
+            directory,
+            prefix,
+            self._light_layers,
+        )
+
+        # The walk reaches the directory to start in just as a walk of the root would on
+        # its way there, reading every ignore-file above it, but listing nothing beside
+        # it. Documented at https://cariad.github.io/mosey/starting-directories/.
+        for name, identity in zip(names, identities, strict=True):
+            found = find_directory(
+                directory,
+                candidates,
+                name,
+                identity,
             )
-        else:
-            root_candidates = list_candidates(
-                root_str,
-                ignore_symlinks=self._ignore_symlinks,
+
+            # A walk of the root would never reach it.
+            if found is None:
+                return
+
+            directory = os.path.join(directory, found)
+            prefix = prefix + found + "/"
+
+            candidates, layers = self._read_directory(
+                directory,
+                prefix,
+                layers,
             )
 
-            root_layers = ()
-
-        stack = [(root_str, "", iter(root_candidates), root_layers)]
+        stack = [
+            (
+                directory,
+                prefix,
+                "/".join(names) + "/" if names else "",
+                iter(candidates),
+                layers,
+            )
+        ]
 
         # NOTE: Some reviewers suggest a loop that takes one candidate at a time with
         # NOTE: `next(iterator, None)` instead, and never breaks out of a `for` loop.
@@ -167,12 +207,13 @@ class MoseyWalker:
         # NOTE: macOS; the `next` approach took 20-26% longer looping per file, which
         # NOTE: made a walk of a real directory about 2% slower.
         while stack:
-            directory, prefix, candidates, layers = stack[-1]
+            directory, prefix, step_prefix, candidates, layers = stack[-1]
 
             for name, is_dir, is_symlink in candidates:
                 if is_dir:
                     path = os.path.join(directory, name)
                     path_prefix = prefix + name + "/"
+                    path_step_prefix = step_prefix + name + "/"
 
                     # When the walk judges nothing, the subdirectory is listed exactly
                     # as it would be if ignore-files and patterns didn't exist.
@@ -196,7 +237,13 @@ class MoseyWalker:
 
                     # Add this subdirectory to the stack...
                     stack.append(
-                        (path, path_prefix, iter(path_candidates), path_layers)
+                        (
+                            path,
+                            path_prefix,
+                            path_step_prefix,
+                            iter(path_candidates),
+                            path_layers,
+                        )
                     )
 
                     # ...and now break to walk it.
@@ -208,7 +255,7 @@ class MoseyWalker:
 
                 yield MoseyStep(
                     name,
-                    prefix + name,
+                    step_prefix + name,
                     root,
                     is_symlink=is_symlink,
                 )
@@ -217,8 +264,62 @@ class MoseyWalker:
                 # We're done with this directory.
                 stack.pop()
 
-    def walk(self, root: os.PathLike[str] | str) -> Iterator[Step]:
+    def _read_directory(
+        self,
+        directory: str,
+        prefix: str,
+        layers: Layers,
+    ) -> tuple[list[Candidate], Layers]:
+        """Return a directory's candidates that aren't ignored, and its layers.
+
+        The walk reads its root, and the directories down to the one it starts in, with
+        this. It reads every other directory itself, in the same way, to save a call.
+
+        Args:
+            directory: Path to the directory to read.
+            prefix: The directory's path relative to the walk's root, with a "/" after
+                each name: "" for the root, or "a/b/" for "root/a/b".
+            layers: The layers from the ignore-files in every directory above this one,
+                deepest first, then the light layers.
+
+        Returns:
+            The candidates that aren't ignored, in walk order, and the layers for the
+            directory's subdirectories.
+        """
+        # NOTE: We check whether the walk judges anything here and for every
+        # NOTE: subdirectory in `_iterate`, rather than keep a second copy of the loop
+        # NOTE: for walks that don't. On Python 3.11 to 3.14 on arm64 macOS, a walk with
+        # NOTE: no name or patterns took 0-0.6% longer than before ignore-files, and a
+        # NOTE: walk with a name that no file in the tree has took 0.6-1.4% longer.
+        # NOTE: Adding default and overriding patterns changed neither: within 0.2%.
+        if self._judges:
+            return read_directory(
+                directory,
+                prefix,
+                self._heavy_layers,
+                layers,
+                self._ignore_filename,
+                self._ignore_filename_layers,
+                ignore_symlinks=self._ignore_symlinks,
+            )
+
+        candidates = list_candidates(
+            directory,
+            ignore_symlinks=self._ignore_symlinks,
+        )
+
+        return candidates, layers
+
+    def walk(
+        self,
+        root: os.PathLike[str] | str,
+        *,
+        start: os.PathLike[str] | str = ".",
+    ) -> Iterator[Step]:
         """Walk a directory, as documented by the `Walker` protocol's `walk`."""
+        # The path to start in is checked before the file system is touched.
+        names = split_start(start)
+
         # `Path` normalises an empty string to ".", which would walk the current working
         # directory. This feels a bit unexpected, so we'll protect the user and have
         # them pass an explicit "." if that's what they want.
@@ -290,8 +391,51 @@ class MoseyWalker:
         with os.scandir(root_str):
             pass
 
+        # The directory to start in is checked one name at a time, never following a
+        # symlink, because a walk of the root would never walk into one. Like the root,
+        # a directory to start in that can't exist raises `FileNotFoundError`, and one
+        # that isn't a directory raises `NotADirectoryError`. Each directory's identity
+        # is kept, to find it in its parent's listing during the walk.
+        #
+        # Each `os.lstat` raises `FileNotFoundError` if there's nothing there, and
+        # `PermissionError` if permissions deny searching the directory above it.
+        #
+        # Each name goes after a separator rather than through `os.path.join`, which on
+        # Windows would throw away everything before a name with a drive, like "C:", and
+        # check a path outside the root. Joining nothing to the root first ends it with
+        # a separator, unless it already ends with one, like "/" or "C:\\".
+        base = os.path.join(root_str, "")
+        identities: list[os.stat_result] = []
+        start_str = root_str
+
+        for index in range(len(names)):
+            start_str = base + os.sep.join(names[: index + 1])
+            identity = os.lstat(start_str)
+
+            if not stat.S_ISDIR(identity.st_mode):
+                # Something beneath a file or a symlink can't be walked to, so it can't
+                # exist as far as the walk is concerned.
+                if index < len(names) - 1:
+                    raise_file_not_found(base + os.sep.join(names))
+
+                raise NotADirectoryError(
+                    errno.ENOTDIR,
+                    os.strerror(errno.ENOTDIR),
+                    start_str,
+                )
+
+            identities.append(identity)
+
+        if names:
+            with os.scandir(start_str):
+                pass
+
         # Validation is done, so hand over to the generator.
         #
         # We intentionally don't `yield` anything in this function so that the checks
         # above run immediately rather than waiting for the first call to `next()`.
-        return self._iterate(root_path)
+        return self._iterate(
+            root_path,
+            names,
+            identities,
+        )

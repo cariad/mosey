@@ -42,7 +42,7 @@ The tests need a UTF-8 file system encoding (`tests/conftest.py` stops the run o
 
 ## Walk order, ignore-files and patterns
 
-Mosey's walk order is documented once, in `docs/walk-order.md` (published at <https://cariad.github.io/mosey/walk-order/>), its ignore-file behaviour once, in `docs/ignore-files.md` (published at <https://cariad.github.io/mosey/ignore-files/>), its default and overriding patterns once, in `docs/default-and-overriding-patterns.md` (published at <https://cariad.github.io/mosey/default-and-overriding-patterns/>), its binary files once, in `docs/binary-files.md` (published at <https://cariad.github.io/mosey/binary-files/>), and its symlinks once, in `docs/symlinks.md` (published at <https://cariad.github.io/mosey/symlinks/>).
+Mosey's walk order is documented once, in `docs/walk-order.md` (published at <https://cariad.github.io/mosey/walk-order/>), its ignore-file behaviour once, in `docs/ignore-files.md` (published at <https://cariad.github.io/mosey/ignore-files/>), its default and overriding patterns once, in `docs/default-and-overriding-patterns.md` (published at <https://cariad.github.io/mosey/default-and-overriding-patterns/>), its binary files once, in `docs/binary-files.md` (published at <https://cariad.github.io/mosey/binary-files/>), its symlinks once, in `docs/symlinks.md` (published at <https://cariad.github.io/mosey/symlinks/>), and its starting directories once, in `docs/starting-directories.md` (published at <https://cariad.github.io/mosey/starting-directories/>).
 
 ## Unsupported configurations
 

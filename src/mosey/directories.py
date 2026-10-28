@@ -12,6 +12,56 @@ from .paths import sort_key
 from .rules import Layers, compile_rules, is_ignored
 
 
+def find_directory(
+    directory: str,
+    candidates: list[Candidate],
+    name: str,
+    identity: os.stat_result,
+) -> str | None:
+    """Return the name of the candidate that's the directory a caller named.
+
+    The caller might spell the name differently from the file system, like "SUB" for
+    "sub" on a case-insensitive file system, so when no entry in the directory has the
+    caller's spelling, a candidate with a different name is the one when it's the same
+    directory.
+
+    Args:
+        directory: Path to the directory that holds the candidates.
+        candidates: The directory's candidates that aren't ignored.
+        name: The name as the caller spelled it.
+        identity: The result of `os.lstat` for the directory the caller named.
+
+    Returns:
+        The candidate's name, spelled as the file system reports it, or `None` when no
+        candidate is that directory.
+
+    Raises:
+        OSError: When the directory can't be listed, or a candidate's identity can't be
+            looked up.
+    """
+    # A directory's names are unique, so a candidate that's spelled the same is the one,
+    # and no other's identity needs looking up.
+    if (name, True, False) in candidates:
+        return name
+
+    # An entry spelled the same that isn't a candidate was ignored, so it's not walked,
+    # even when a candidate is the same directory by another name, like a second bind
+    # mount of it on Linux. This lists the directory again, but only on the way down to
+    # the directory to start in, and only when its name is ignored or spelled
+    # differently.
+    if any(entry[0] == name for entry in list_candidates(directory)):
+        return None
+
+    for candidate_name, is_dir, _ in candidates:
+        if is_dir and os.path.samestat(
+            os.lstat(os.path.join(directory, candidate_name)),
+            identity,
+        ):
+            return candidate_name
+
+    return None
+
+
 def list_candidates(
     directory: str,
     *,

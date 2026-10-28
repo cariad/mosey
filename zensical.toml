@@ -7,6 +7,7 @@ nav = [
   { "Default and overriding patterns" = "default-and-overriding-patterns.md" },
   { "Binary files" = "binary-files.md" },
   { "Symlinks" = "symlinks.md" },
+  { "Starting directories" = "starting-directories.md" },
   { "Unsupported configurations" = "unsupported.md" },
   { "API reference" = [
     { "Mosey" = "api/mosey.md" },
