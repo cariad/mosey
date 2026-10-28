@@ -301,3 +301,9 @@ def test_split_start__not_beneath_the_root(start: os.PathLike[str] | str) -> Non
     """`ValueError` is raised when the start isn't a path beneath the root."""
     with raises(ValueError, match="isn't a path beneath the root"):
         split_start(start)
+
+
+def test_split_start__null_character() -> None:
+    """`ValueError` is raised when the start contains a null character."""
+    with raises(ValueError, match="contains a null character"):
+        split_start("a/\x00")

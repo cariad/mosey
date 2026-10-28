@@ -28,6 +28,7 @@ for step in walker.walk("templates", start="docs/guides"):
 - Each step's [`relative_as_posix`][mosey.Step.relative_as_posix] stays relative to the directory you walk, and begins with `start` as a POSIX-style path, then a forward slash. So `relative_as_posix.removeprefix("docs/guides/")` gives a path relative to `start`.
 - When an ignore-file or [pattern](default-and-overriding-patterns.md) ignores `start`, or any directory above it, the walk yields nothing, because a walk of the whole directory would never reach it.
 - `start` never goes through a [symlink](symlinks.md), because a walk never walks into one. Like the directory you walk, a `start` that doesn't exist, or can't exist because it's beneath a file or a symlink, raises `FileNotFoundError`, and a `start` that's a file or a symlink raises `NotADirectoryError`. Mosey checks before the walk begins.
+- Each name in `start` has to be spelled exactly as the file system lists it, even on macOS and Windows, where the file system itself would find `DOCS` for `docs`. Otherwise, it doesn't exist as far as the walk is concerned, and raises `FileNotFoundError`. Mosey never translates names, so they match the paths in each step's `relative_as_posix`.
 
 ## Example
 
@@ -66,5 +67,5 @@ A walk with `start="docs/guides/drafts"` yields nothing, because a walk of `temp
 ## Behaviour you might not expect
 
 - **`start` is tidied up like a `Path`.** `"docs//guides/"` and `"./docs/guides"` both start in `docs/guides`, and each step's `relative_as_posix` begins with `docs/guides/`.
-- **A different spelling of `start` still works where the file system allows it.** On a case-insensitive file system, like macOS's and Windows' defaults, `start="DOCS/Guides"` starts in `docs/guides`. Mosey judges each directory by the name the file system reports, so the ignore-files see `docs/guides`, but each step's `relative_as_posix` begins with `DOCS/Guides/`, as you spelled it.
+- **`start="DOCS/Guides"` doesn't start in `docs/guides`**, even on macOS and Windows, where opening `DOCS/Guides` would work. It raises `FileNotFoundError`, just as `.WALKIGNORE` is never read as `.walkignore`. On macOS, the same goes for a name with an accent that's encoded differently from the one on disk, like `café` typed with a combined `é` and saved with an `e` and a separate accent.
 - **Errors about `start` come before the walk, but ignoring comes during it.** A `start` that doesn't exist raises an error even when an ignore-file ignores a directory above it, and a `start` that's ignored raises nothing: the walk just yields nothing.

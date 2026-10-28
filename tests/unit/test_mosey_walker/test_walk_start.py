@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from pytest import MonkeyPatch, fail, mark, param, raises, skip
+from pytest import MonkeyPatch, fail, mark, param, raises
 
 from mosey import Mosey
 from tests.file_system_helpers import (
@@ -221,19 +221,6 @@ START_CASES = [
         id="ignore-files-left-out",
     ),
 ]
-
-
-def is_case_insensitive(directory: Path) -> bool:
-    """Check if a directory's file system ignores case.
-
-    Args:
-        directory: Path to an empty directory on the file system to check.
-
-    Returns:
-        `True` if the file system ignores case, otherwise `False`.
-    """
-    make_tree(directory, "case/")
-    return (directory / "CASE").exists()
 
 
 @mark.parametrize("case", START_CASES)
@@ -469,19 +456,17 @@ def test_walk__start__null_character(tmp_path: Path) -> None:
 
 @needs_posix_permissions
 def test_walk__start__parent_listing_is_denied(tmp_path: Path) -> None:
-    """The directories above the start are listed, lazily, to judge the way down."""
+    """`PermissionError` is raised when permissions deny listing a start's parent."""
     make_tree(tmp_path, "a/b/c.txt")
     walker = build_walker("ignore")
 
-    # Write and search ("execute") but not read, so the start can be reached and listed,
-    # but its parent can't be listed.
+    # Write and search ("execute") but not read, so the start could be reached, but its
+    # parent can't be listed to find it.
     (tmp_path / "a").chmod(0o300)
 
     try:
-        steps = walker.walk(tmp_path, start="a/b")
-
         with raises(PermissionError) as raised:
-            next(steps)
+            walker.walk(tmp_path, start="a/b")
     finally:
         # Restore access so pytest can clean up `tmp_path`.
         (tmp_path / "a").chmod(0o700)
@@ -586,35 +571,31 @@ def test_walk__start__siblings_not_listed(tmp_path: Path) -> None:
 
 
 @mark.parametrize(
-    ("ignore_files", "start", "listed"),
+    ("start", "missing"),
     [
-        param({}, "A/B", ["A/B/c.txt", "A/B/d/e.txt"], id="nothing-ignored"),
-        param({"": ["/a/b/c.txt"]}, "A/b", ["A/b/d/e.txt"], id="judged-by-real-names"),
-        param({"": ["b/"]}, "A/B", [], id="ignored-by-real-name"),
-        param({"": ["B/"]}, "A/B", ["A/B/c.txt", "A/B/d/e.txt"], id="not-by-spelling"),
+        param("A/b", "A", id="first-name"),
+        param("a/B", "a/B", id="last-name"),
+        param("cafe\u0301", "cafe\u0301", id="decomposed"),
     ],
 )
 def test_walk__start__spelled_differently(
     tmp_path: Path,
-    ignore_files: dict[str, list[str] | bytes],
     start: str,
-    listed: list[str],
+    missing: str,
 ) -> None:
-    """A differently spelled start is judged by real names, and spelled as given."""
-    if not is_case_insensitive(tmp_path / "probe"):
-        skip("The file system is case-sensitive")
+    """`FileNotFoundError` is raised when a name isn't spelled as it's listed.
 
-    root = tmp_path / "root"
-    make_tree(root, "a/b/c.txt", "a/b/d/e.txt", "a/f/g.txt", "h/")
-    write_ignore_files(root, ignore_files)
-    walker = build_walker("ignore")
+    That's so even on a file system that would find the directory by that spelling,
+    like macOS's and Windows' by default.
+    """
+    make_tree(tmp_path, "a/b/c.txt", "caf\u00e9/d.txt")
 
-    walked = [step.relative_as_posix for step in walker.walk(root, start=start)]
-    assert walked == listed
+    # macOS's file system keeps names as they're given, so "café" stays composed.
+    with raises(FileNotFoundError) as raised:
+        Mosey().build().walk(tmp_path, start=start)
 
-    # Each step's spelled path still reaches its file.
-    for path in walked:
-        assert (root / path).is_file()
+    assert raised.value.errno == errno.ENOENT
+    assert raised.value.filename == os.fspath(tmp_path.joinpath(*missing.split("/")))
 
 
 @needs_posix_permissions

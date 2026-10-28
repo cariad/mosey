@@ -72,17 +72,25 @@ def split_start(start: os.PathLike[str] | str) -> tuple[str, ...]:
 
     Raises:
         FileNotFoundError: When `start` is empty.
-        ValueError: When `start` is absolute, has a drive, or holds "..".
+        ValueError: When `start` is absolute, has a drive, holds "..", or contains a
+            null character.
     """
     # As with the root, `Path` would turn an empty string into ".", which feels a bit
     # unexpected, so an explicit "." is asked for instead.
-    if not os.fspath(start):
+    text = os.fspath(start)
+
+    if not text:
         raise_file_not_found("")
+
+    # The operating system refuses a null character in the root, and no name it lists
+    # can hold one, so it's refused here too, rather than reported as missing.
+    if "\x00" in text:
+        raise ValueError(f"{text!r} contains a null character")
 
     path = Path(start)
 
     # The directory to start in is beneath the root, so nothing can take it elsewhere.
     if path.anchor or ".." in path.parts:
-        raise ValueError(f"{os.fspath(start)!r} isn't a path beneath the root")
+        raise ValueError(f"{text!r} isn't a path beneath the root")
 
     return path.parts

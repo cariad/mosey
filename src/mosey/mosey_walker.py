@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Final, final
 
 from .candidate import Candidate
-from .directories import find_directory, list_candidates, read_directory
+from .directories import list_candidates, read_directory
 from .exceptions import raise_file_not_found
 from .mosey_step import MoseyStep
 from .paths import split_start
@@ -100,7 +100,6 @@ class MoseyWalker:
         self,
         root: Path,
         names: tuple[str, ...],
-        identities: list[os.stat_result],
     ) -> Iterator[Step]:
         """Walk a directory and yield a `Step` for every file that isn't ignored.
 
@@ -119,9 +118,6 @@ class MoseyWalker:
 
                 An empty tuple starts in `root` itself.
 
-            identities: The result of `os.lstat` for each directory in `names`, in the
-                same order.
-
         Yields:
             A `Step` for every file that isn't ignored.
         """
@@ -133,11 +129,8 @@ class MoseyWalker:
         # holds:
         #
         #  - The directory's path, for listing its subdirectories.
-        #  - The directory's path relative to the root, as a POSIX-style prefix for
-        #    judging its entries: "" for the root, or "a/b/" for "root/a/b".
-        #  - The same prefix for its steps. The names in `names` are spelled as the
-        #    caller spelled them, which can differ from the file system's spelling,
-        #    like "A/" for "a/" on a case-insensitive file system.
+        #  - The directory's path relative to the root, as a POSIX-style prefix for its
+        #    entries: "" for the root, or "a/b/" for "root/a/b".
         #  - An iterator over the directory's remaining candidates. It has to be an
         #    iterator rather than the list itself, so that the `for` loop below resumes
         #    where it left off instead of starting the list again.
@@ -150,11 +143,6 @@ class MoseyWalker:
         # changes what gets walked. We don't guard against that: each step's path
         # starts with the same relative root, so it would point into the new directory
         # anyway. `os.walk` behaves the same way.
-        #
-        # NOTE: On Python 3.14 on arm64 macOS, carrying the step prefix in each frame,
-        # NOTE: beside the prefix for judging, changed walks of 24,000 files in a
-        # NOTE: virtual environment's site-packages, with an ignore-file name, by under
-        # NOTE: 0.5%: within the noise between runs.
         directory = os.fspath(root)
         prefix = ""
 
@@ -169,20 +157,14 @@ class MoseyWalker:
         # The walk reaches the directory to start in just as a walk of the root would on
         # its way there, reading every ignore-file above it, but listing nothing beside
         # it. Documented at https://cariad.github.io/mosey/starting-directories/.
-        for name, identity in zip(names, identities, strict=True):
-            found = find_directory(
-                directory,
-                candidates,
-                name,
-                identity,
-            )
-
-            # A walk of the root would never reach it.
-            if found is None:
+        for name in names:
+            # The name was checked to be a directory in the listing, so if it isn't a
+            # candidate now, it's ignored, and a walk of the root would never reach it.
+            if (name, True, False) not in candidates:
                 return
 
-            directory = os.path.join(directory, found)
-            prefix = prefix + found + "/"
+            directory = os.path.join(directory, name)
+            prefix = prefix + name + "/"
 
             candidates, layers = self._read_directory(
                 directory,
@@ -190,15 +172,7 @@ class MoseyWalker:
                 layers,
             )
 
-        stack = [
-            (
-                directory,
-                prefix,
-                "/".join(names) + "/" if names else "",
-                iter(candidates),
-                layers,
-            )
-        ]
+        stack = [(directory, prefix, iter(candidates), layers)]
 
         # NOTE: Some reviewers suggest a loop that takes one candidate at a time with
         # NOTE: `next(iterator, None)` instead, and never breaks out of a `for` loop.
@@ -207,13 +181,12 @@ class MoseyWalker:
         # NOTE: macOS; the `next` approach took 20-26% longer looping per file, which
         # NOTE: made a walk of a real directory about 2% slower.
         while stack:
-            directory, prefix, step_prefix, candidates, layers = stack[-1]
+            directory, prefix, candidates, layers = stack[-1]
 
             for name, is_dir, is_symlink in candidates:
                 if is_dir:
                     path = os.path.join(directory, name)
                     path_prefix = prefix + name + "/"
-                    path_step_prefix = step_prefix + name + "/"
 
                     # When the walk judges nothing, the subdirectory is listed exactly
                     # as it would be if ignore-files and patterns didn't exist.
@@ -240,7 +213,6 @@ class MoseyWalker:
                         (
                             path,
                             path_prefix,
-                            path_step_prefix,
                             iter(path_candidates),
                             path_layers,
                         )
@@ -255,7 +227,7 @@ class MoseyWalker:
 
                 yield MoseyStep(
                     name,
-                    step_prefix + name,
+                    prefix + name,
                     root,
                     is_symlink=is_symlink,
                 )
@@ -391,40 +363,47 @@ class MoseyWalker:
         with os.scandir(root_str):
             pass
 
-        # The directory to start in is checked one name at a time, never following a
-        # symlink, because a walk of the root would never walk into one. Like the root,
-        # a directory to start in that can't exist raises `FileNotFoundError`, and one
-        # that isn't a directory raises `NotADirectoryError`. Each directory's identity
-        # is kept, to find it in its parent's listing during the walk.
+        # The directory to start in is checked one name at a time, by looking for each
+        # name in its directory's listing, spelled exactly as the file system spells
+        # it, and never following a symlink, because a walk of the root would never
+        # walk into one. Like the root, a directory to start in that can't exist raises
+        # `FileNotFoundError`, and one that isn't a directory raises
+        # `NotADirectoryError`.
         #
-        # Each `os.lstat` raises `FileNotFoundError` if there's nothing there, and
-        # `PermissionError` if permissions deny searching the directory above it.
-        #
-        # Each name goes after a separator rather than through `os.path.join`, which on
-        # Windows would throw away everything before a name with a drive, like "C:", and
-        # check a path outside the root. Joining nothing to the root first ends it with
-        # a separator, unless it already ends with one, like "/" or "C:\\".
+        # Each name is only joined on with `os.path.join` once it's found in the
+        # listing. Joining one that isn't there would throw away everything before it on
+        # Windows if it had a drive, like "C:", so an error names its path by adding it
+        # after a separator instead. Joining nothing to the root first ends it with a
+        # separator, unless it already ends with one, like "/" or "C:\\".
         base = os.path.join(root_str, "")
-        identities: list[os.stat_result] = []
         start_str = root_str
 
-        for index in range(len(names)):
-            start_str = base + os.sep.join(names[: index + 1])
-            identity = os.lstat(start_str)
+        for index, name in enumerate(names):
+            candidates = list_candidates(start_str)
 
-            if not stat.S_ISDIR(identity.st_mode):
-                # Something beneath a file or a symlink can't be walked to, so it can't
-                # exist as far as the walk is concerned.
-                if index < len(names) - 1:
-                    raise_file_not_found(base + os.sep.join(names))
+            if (name, True, False) in candidates:
+                start_str = os.path.join(start_str, name)
+                continue
 
-                raise NotADirectoryError(
-                    errno.ENOTDIR,
-                    os.strerror(errno.ENOTDIR),
-                    start_str,
-                )
+            path = base + os.sep.join(names[: index + 1])
 
-            identities.append(identity)
+            if (name, False, False) not in candidates and (
+                name,
+                False,
+                True,
+            ) not in candidates:
+                raise_file_not_found(path)
+
+            # Something beneath a file or a symlink can't be walked to, so it can't
+            # exist as far as the walk is concerned.
+            if index < len(names) - 1:
+                raise_file_not_found(base + os.sep.join(names))
+
+            raise NotADirectoryError(
+                errno.ENOTDIR,
+                os.strerror(errno.ENOTDIR),
+                path,
+            )
 
         if names:
             with os.scandir(start_str):
@@ -437,5 +416,4 @@ class MoseyWalker:
         return self._iterate(
             root_path,
             names,
-            identities,
         )
