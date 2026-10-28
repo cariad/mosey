@@ -4,10 +4,13 @@ These are internal helpers for the `mosey` package. Nothing here is explicitly e
 by the package, and signatures can change without notice.
 """
 
+import os
 import sys
+from pathlib import Path
 from typing import Final
 
 from .candidate import Candidate
+from .exceptions import raise_file_not_found
 
 FS_ENCODING: Final[str] = sys.getfilesystemencoding()
 """The encoding that converts filenames between strings and bytes."""
@@ -47,3 +50,47 @@ def sort_key(candidate: Candidate) -> bytes:
     # NOTE: needing a lambda in the middle.
     key = candidate[0].encode(FS_ENCODING, FS_ERRORS)
     return key + b"/" if candidate[1] else key
+
+
+def split_start(start: os.PathLike[str] | str) -> tuple[str, ...]:
+    """Split the path to a walk's starting directory into its names.
+
+    Like the walk's root, the path is tidied up by `pathlib`, so "a//b/" and "./a/b" are
+    both "a/b", and so is "a" and "b" separated by a backslash on Windows.
+
+    Args:
+        start: Path to the starting directory, relative to the walk's root, or "." for
+            the root itself.
+
+    Returns:
+        The names of the directories to walk through to reach the starting directory,
+        outermost first.
+
+        For example, `("a", "b")` for "a/b".
+
+        Returns an empty tuple for "." — the root itself.
+
+    Raises:
+        FileNotFoundError: When `start` is empty.
+        ValueError: When `start` is absolute, has a drive, holds "..", or contains a
+            null character.
+    """
+    # As with the root, `Path` would turn an empty string into ".", which feels a bit
+    # unexpected, so an explicit "." is asked for instead.
+    text = os.fspath(start)
+
+    if not text:
+        raise_file_not_found("")
+
+    # The operating system refuses a null character in the root, and no name it lists
+    # can hold one, so it's refused here too, rather than reported as missing.
+    if "\x00" in text:
+        raise ValueError(f"{text!r} contains a null character")
+
+    path = Path(start)
+
+    # The directory to start in is beneath the root, so nothing can take it elsewhere.
+    if path.anchor or ".." in path.parts:
+        raise ValueError(f"{text!r} isn't a path beneath the root")
+
+    return path.parts

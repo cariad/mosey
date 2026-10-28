@@ -2,11 +2,12 @@
 
 import os
 import sys
+from pathlib import Path
 
-from pytest import mark, param
+from pytest import mark, param, raises
 
 from mosey.candidate import Candidate
-from mosey.paths import sort_key
+from mosey.paths import sort_key, split_start
 
 
 @mark.parametrize(
@@ -268,3 +269,41 @@ def test_sort_key__raw_bytes() -> None:
     ]
 
     assert ordered == expect
+
+
+@mark.parametrize(
+    ("start", "expect"),
+    [
+        (".", ()),
+        ("./", ()),
+        ("a", ("a",)),
+        ("a/b", ("a", "b")),
+        ("a//b/", ("a", "b")),
+        ("./a/./b", ("a", "b")),
+        ("a.b/.c/d..", ("a.b", ".c", "d..")),
+        ("café/ ", ("café", " ")),
+        (Path("a", "b"), ("a", "b")),
+    ],
+)
+def test_split_start(start: os.PathLike[str] | str, expect: tuple[str, ...]) -> None:
+    """A start splits into its names, tidied up like a `Path`, and "." into none."""
+    assert split_start(start) == expect
+
+
+def test_split_start__empty() -> None:
+    """`FileNotFoundError` is raised when the start is empty."""
+    with raises(FileNotFoundError):
+        split_start("")
+
+
+@mark.parametrize("start", ["/", "/a", "..", "a/..", "a/../b", Path("/a")])
+def test_split_start__not_beneath_the_root(start: os.PathLike[str] | str) -> None:
+    """`ValueError` is raised when the start isn't a path beneath the root."""
+    with raises(ValueError, match="isn't a path beneath the root"):
+        split_start(start)
+
+
+def test_split_start__null_character() -> None:
+    """`ValueError` is raised when the start contains a null character."""
+    with raises(ValueError, match="contains a null character"):
+        split_start("a/\x00")

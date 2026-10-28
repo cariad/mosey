@@ -22,7 +22,12 @@ class Walker(Protocol):
     threads, but never an iterator.
     """
 
-    def walk(self, root: os.PathLike[str] | str) -> Iterator[Step]:
+    def walk(
+        self,
+        root: os.PathLike[str] | str,
+        *,
+        start: os.PathLike[str] | str = ".",
+    ) -> Iterator[Step]:
         """Walk a directory and yield a [`Step`][mosey.Step] for every file not ignored.
 
         Files are yielded in a deterministic walk order, documented at
@@ -41,11 +46,17 @@ class Walker(Protocol):
         When the walker ignores symlinks (set by
         [`Mosey.ignore_symlinks`][mosey.Mosey.ignore_symlinks]), it yields none.
 
+        With `start`, the walk yields only what a walk of `root` yields within that
+        subdirectory, and lists nothing beside it, as documented at
+        [starting directories][starting-directories].
+
         A relative root is found from the working directory each time a subdirectory is
         read, so don't change the working directory during a walk.
 
         Args:
             root: Path to the directory to walk.
+            start: Path to the subdirectory to start in, relative to `root`. The
+                default, `"."`, starts in `root` itself.
 
         Returns:
             An iterator of [`Step`][mosey.Step]; one for every file not ignored.
@@ -58,16 +69,23 @@ class Walker(Protocol):
                 when it can't read an ignore-file, say because it's a broken symlink or
                 permissions deny reading it.
 
-                `root` itself isn't listed until the first step is requested.
+                Without `start`, `root` itself isn't listed until the first step is
+                requested. With it, `root` and every directory down to `start` are
+                listed straight away, to check `start`.
 
         Raises:
-            FileNotFoundError: When `root` is empty, doesn't exist, or can't exist (e.g.
-                when its parent isn't a directory).
-            NotADirectoryError: When `root` isn't a directory.
+            FileNotFoundError: When `root` or `start` is empty, doesn't exist, or can't
+                exist (e.g. when its parent isn't a directory). `start` can't exist
+                beneath a symlink either, and each of its names has to be spelled
+                exactly as the file system lists it.
+            NotADirectoryError: When `root` or `start` isn't a directory, or `start` is
+                a symlink, even one to a directory.
             OSError: When the operating system can't resolve `root` for another reason,
-                like its name being too long or a loop of symlinks.
+                like its name being too long or a loop of symlinks, or can't list a
+                directory on the way to `start`.
             PermissionError: When file system permissions deny reaching or listing
-                `root`.
-            ValueError: When `root` contains a null character.
+                `root`, or listing `start` or a directory on the way to it.
+            ValueError: When `root` or `start` contains a null character, or `start` is
+                absolute, has a drive, or holds `".."`.
         """
         ...
