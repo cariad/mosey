@@ -50,3 +50,12 @@ needs_symlinks = mark.skipif(
     reason="Windows needs admin rights or Developer Mode to create symlinks",
 )
 """Skips a test that relies on creating symlinks, unless running in CI."""
+
+needs_unix_sockets = mark.skipif(
+    sys.platform == "win32",
+    reason="Python can't create Unix domain sockets on this platform",
+)
+"""Skips a test that relies on creating Unix domain sockets.
+
+Windows has no `socket.AF_UNIX`.
+"""
