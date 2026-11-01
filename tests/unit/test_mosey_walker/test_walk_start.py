@@ -2,8 +2,10 @@
 
 import errno
 import os
+import stat
 import sys
 from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
 from typing import NamedTuple
 
@@ -13,8 +15,10 @@ from mosey import Mosey
 from tests.file_system_helpers import (
     build_walker,
     make_broken_symlink,
+    make_fifo,
     make_file,
     make_junction,
+    make_socket,
     make_symlink_to_directory,
     make_symlink_to_file,
     make_tree,
@@ -25,12 +29,15 @@ from tests.file_system_helpers import (
 )
 from tests.git_oracle import git_list_files
 from tests.markers import (
+    needs_fifos,
     needs_git,
     needs_junctions,
     needs_posix_permissions,
     needs_symlinks,
+    needs_unix_sockets,
 )
 from tests.random_trees import build, random_tree
+from tests.timeouts import alarm
 
 SEED = f"{sys.platform}-{sys.version_info.major}.{sys.version_info.minor}/start"
 """The seed that every random tree is made from, along with its index.
@@ -258,16 +265,21 @@ def test_walk__start__backslashes(tmp_path: Path) -> None:
 @mark.parametrize(
     "make",
     [
+        param(make_fifo, marks=needs_fifos),
         make_file,
+        param(make_socket, marks=needs_unix_sockets),
         param(make_symlink_to_file, marks=needs_symlinks),
         param(make_symlink_to_directory, marks=needs_symlinks),
     ],
 )
-def test_walk__start__beneath_a_file_or_symlink(
+def test_walk__start__beneath_a_non_directory(
     tmp_path: Path,
     make: Callable[[Path], None],
 ) -> None:
-    """`FileNotFoundError` is raised when the start is beneath a file or a symlink."""
+    """`FileNotFoundError` is raised when the start is beneath anything but a directory.
+
+    That's a file, a symlink, or something that's never a candidate, like a FIFO.
+    """
     make_tree(tmp_path, "a/")
     make(tmp_path / "a" / "b")
 
@@ -275,7 +287,15 @@ def test_walk__start__beneath_a_file_or_symlink(
     if (tmp_path / "a" / "b").is_dir():
         make_tree(tmp_path / "a" / "b", "c/")
 
-    with raises(FileNotFoundError) as raised:
+    # Opening a FIFO waits for a writer, which here would be never. The walk should
+    # never open one, but if it does, the alarm fails the test rather than hangs it.
+    guard = (
+        alarm(1, "Waited for the FIFO to be opened for writing")
+        if make is make_fifo
+        else nullcontext()
+    )
+
+    with guard, raises(FileNotFoundError) as raised:
         Mosey().build().walk(tmp_path, start="a/b/c")
 
     assert raised.value.errno == errno.ENOENT
@@ -306,6 +326,30 @@ def test_walk__start__default(tmp_path: Path) -> None:
     expect = ["a.txt", "c/d.txt"]
     assert [step.relative_as_posix for step in walker.walk(tmp_path)] == expect
     assert [s.relative_as_posix for s in walker.walk(tmp_path, start=".")] == expect
+
+
+@mark.skipif(sys.platform == "win32", reason="Windows has no /dev/null")
+def test_walk__start__device() -> None:
+    """A device is never a candidate, but it exists, so it isn't a directory.
+
+    Only the root user can create a device, so this uses the one every Linux and macOS
+    system has: "/dev/null", a character device.
+    """
+    assert stat.S_ISCHR(os.lstat("/dev/null").st_mode)
+
+    walker = Mosey().build()
+
+    with raises(NotADirectoryError) as not_a_directory:
+        walker.walk("/dev", start="null")
+
+    assert not_a_directory.value.errno == errno.ENOTDIR
+    assert not_a_directory.value.filename == "/dev/null"
+
+    with raises(FileNotFoundError) as not_found:
+        walker.walk("/dev", start="null/a")
+
+    assert not_found.value.errno == errno.ENOENT
+    assert not_found.value.filename == "/dev/null/a"
 
 
 @mark.parametrize("start", ["a/b", "a/b/c"])
@@ -413,7 +457,9 @@ def test_walk__start__missing_beneath_ignored(tmp_path: Path) -> None:
 @mark.parametrize(
     "make",
     [
+        param(make_fifo, marks=needs_fifos),
         make_file,
+        param(make_socket, marks=needs_unix_sockets),
         param(make_symlink_to_file, marks=needs_symlinks),
         param(make_symlink_to_directory, marks=needs_symlinks),
         param(make_broken_symlink, marks=needs_symlinks),
@@ -423,11 +469,22 @@ def test_walk__start__not_a_directory(
     tmp_path: Path,
     make: Callable[[Path], None],
 ) -> None:
-    """`NotADirectoryError` is raised when the start is a file or a symlink."""
+    """`NotADirectoryError` is raised when the start is anything but a directory.
+
+    That's a file, a symlink, or something that's never a candidate, like a FIFO.
+    """
     make_tree(tmp_path, "a/")
     make(tmp_path / "a" / "b")
 
-    with raises(NotADirectoryError) as raised:
+    # Opening a FIFO waits for a writer, which here would be never. The walk should
+    # never open one, but if it does, the alarm fails the test rather than hangs it.
+    guard = (
+        alarm(1, "Waited for the FIFO to be opened for writing")
+        if make is make_fifo
+        else nullcontext()
+    )
+
+    with guard, raises(NotADirectoryError) as raised:
         Mosey().build().walk(tmp_path, start="a/b")
 
     assert raised.value.errno == errno.ENOTDIR

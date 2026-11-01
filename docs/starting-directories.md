@@ -27,7 +27,9 @@ for step in walker.walk("templates", start="docs/guides"):
 - Mosey lists the directories above `start`, to read their ignore-files and judge the names on the way down, but walks nothing beside `start`.
 - Each step's [`relative_as_posix`][mosey.Step.relative_as_posix] stays relative to the directory you walk, and begins with `start` as a POSIX-style path, then a forward slash. So `relative_as_posix.removeprefix("docs/guides/")` gives a path relative to `start`.
 - When an ignore-file or [pattern](default-and-overriding-patterns.md) ignores `start`, or any directory above it, the walk yields nothing, because a walk of the whole directory would never reach it.
-- `start` never goes through a [symlink](symlinks.md), because a walk never walks into one. Like the directory you walk, a `start` that doesn't exist, or can't exist because it's beneath a file or a symlink, raises `FileNotFoundError`, and a `start` that's a file or a symlink raises `NotADirectoryError`. Mosey checks before the walk begins.
+- `start` never goes through a [symlink](symlinks.md), because a walk never walks into one.
+- Like the directory you walk, a `start` that doesn't exist, or can't exist because it's beneath anything but a directory, raises `FileNotFoundError`.
+- A `start` that's anything but a directory, like a file, a symlink, a FIFO, a socket, or a device, raises `NotADirectoryError`. Mosey checks both before the walk begins.
 - Each name in `start` has to be spelled exactly as the file system lists it, even on macOS and Windows, where the file system itself would find `DOCS` for `docs`. Otherwise, it doesn't exist as far as the walk is concerned, and raises `FileNotFoundError`. Mosey never translates names, so they match the paths in each step's `relative_as_posix`.
 
 ## Example

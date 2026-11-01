@@ -4,6 +4,7 @@ import errno
 import os
 import sys
 from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
 
 from pytest import MonkeyPatch, mark, param, raises
@@ -13,8 +14,10 @@ from tests.file_system_helpers import (
     build_walker,
     make_broken_symlink,
     make_directory,
+    make_fifo,
     make_file,
     make_nothing,
+    make_socket,
     make_symlink_to_directory,
     make_symlink_to_file,
     make_tree,
@@ -22,9 +25,12 @@ from tests.file_system_helpers import (
     write_ignore_files,
 )
 from tests.markers import (
+    needs_fifos,
     needs_posix_permissions,
     needs_symlinks,
+    needs_unix_sockets,
 )
+from tests.timeouts import alarm
 
 
 @mark.parametrize(
@@ -83,7 +89,15 @@ def test_root_is_beneath_a_file__cause(tmp_path: Path) -> None:
 @mark.parametrize(
     "make",
     [
+        param(
+            make_fifo,
+            marks=needs_fifos,
+        ),
         make_file,
+        param(
+            make_socket,
+            marks=needs_unix_sockets,
+        ),
         param(make_symlink_to_file, marks=needs_symlinks),
     ],
 )
@@ -92,7 +106,15 @@ def test_root_is_not_a_directory(tmp_path: Path, make: Callable[[Path], None]) -
     root = tmp_path / "root"
     make(root)
 
-    with raises(NotADirectoryError) as raised:
+    # Opening a FIFO waits for a writer, which here would be never. The walk should
+    # never open one, but if it does, the alarm fails the test rather than hangs it.
+    guard = (
+        alarm(1, "Waited for the FIFO to be opened for writing")
+        if make is make_fifo
+        else nullcontext()
+    )
+
+    with guard, raises(NotADirectoryError) as raised:
         Mosey().build().walk(root)
 
     assert raised.value.errno == errno.ENOTDIR

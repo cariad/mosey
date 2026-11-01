@@ -1,6 +1,7 @@
 """File system helper functions for unit tests."""
 
 import os
+import socket
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -213,6 +214,36 @@ def make_nothing(path: Path) -> None:
     Args:
         path: Path to leave missing.
     """
+
+
+def make_socket(path: Path) -> None:
+    """Create a Unix domain socket.
+
+    The socket is closed straight away, but its file stays.
+
+    Args:
+        path: Path to create the socket at.
+
+    Raises:
+        AssertionError: When called on Windows, where Python has no `socket.AF_UNIX`.
+        OSError: When `path` already exists.
+    """
+    # `socket.AF_UNIX` doesn't exist on Windows. This assertion convinces pyright that
+    # we won't use it when we're running on Windows.
+    assert sys.platform != "win32"
+
+    # A socket's path can only be about 100 bytes long, and a temporary directory's
+    # path can be longer than that on macOS, so it's bound by name from inside its
+    # directory.
+    working_directory = os.getcwd()
+    os.chdir(path.parent)
+
+    try:
+        with socket.socket(socket.AF_UNIX) as unix_socket:
+            unix_socket.bind(path.name)
+
+    finally:
+        os.chdir(working_directory)
 
 
 def make_symlink_loop(path: Path) -> None:

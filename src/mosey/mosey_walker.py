@@ -379,23 +379,31 @@ class MoseyWalker:
         start_str = root_str
 
         for index, name in enumerate(names):
-            candidates = list_candidates(start_str)
+            # One scan finds the name and says whether it's a directory, so the answers
+            # can't disagree if the directory changes. Looking up the path instead would
+            # find a name spelled differently, like "B" for "b", on a file system that
+            # ignores case.
+            #
+            # A directory is what `list_candidates` lists as one. If it ever lists
+            # special files too (https://github.com/cariad/mosey/issues/42), this could
+            # look in its listing instead.
+            with os.scandir(start_str) as entries:
+                entry = next((entry for entry in entries if entry.name == name), None)
+                is_directory = entry is not None and entry.is_dir(follow_symlinks=False)
 
-            if (name, True, False) in candidates:
+            if is_directory:
                 start_str = os.path.join(start_str, name)
                 continue
 
             path = base + os.sep.join(names[: index + 1])
 
-            if (name, False, False) not in candidates and (
-                name,
-                False,
-                True,
-            ) not in candidates:
+            if entry is None:
                 raise_file_not_found(path)
 
-            # Something beneath a file or a symlink can't be walked to, so it can't
-            # exist as far as the walk is concerned.
+            # Something has the name, but it isn't a directory: it's a file, a symlink,
+            # or something that's never a candidate, like a FIFO, a socket, or a device.
+            # Something beneath it can't be walked to, so it can't exist as far as the
+            # walk is concerned.
             if index < len(names) - 1:
                 raise_file_not_found(base + os.sep.join(names))
 
