@@ -22,6 +22,27 @@ class Walker(Protocol):
     threads, but never an iterator.
     """
 
+    def check_walk_can_start(
+        self,
+        root: os.PathLike[str] | str,
+        *,
+        start: os.PathLike[str] | str = ".",
+    ) -> None:
+        """Check that a walk can start, without walking.
+
+        This runs exactly the checks that [`walk`][mosey.Walker.walk] runs before it
+        returns its iterator, and raises exactly what `walk` raises for them: the same
+        exceptions, naming the same paths, as listed under `walk`'s "Raises". It lists
+        nothing within `start`, and reads no ignore-files, as documented at
+        [starting directories][starting-directories].
+
+        Args:
+            root: Path to the directory to walk.
+            start: Path to the subdirectory to start in, relative to `root`. The
+                default, `"."`, starts in `root` itself.
+        """
+        ...
+
     def walk(
         self,
         root: os.PathLike[str] | str,
@@ -49,6 +70,9 @@ class Walker(Protocol):
         With `start`, the walk yields only what a walk of `root` yields within that
         subdirectory, and lists nothing beside it, as documented at
         [starting directories][starting-directories].
+
+        To run the checks listed under "Raises" without walking, call
+        [`check_walk_can_start`][mosey.Walker.check_walk_can_start].
 
         A relative root is found from the working directory each time a subdirectory is
         read, so don't change the working directory during a walk.

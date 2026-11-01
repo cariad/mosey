@@ -6,12 +6,33 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Protocol
 
 from pytest import skip
 
 from mosey import Mosey, Walker
 from mosey.patterns import Pattern
 from tests.git_oracle import git_list_files
+
+
+class Check(Protocol):
+    """A way to check that a walk can start, like `check_walk_can_start`."""
+
+    def __call__(
+        self,
+        walker: Walker,
+        root: os.PathLike[str] | str,
+        *,
+        start: os.PathLike[str] | str = ".",
+    ) -> None:
+        """Check that a walk can start.
+
+        Args:
+            walker: The walker to check with.
+            root: Path to the directory to walk.
+            start: Path to the subdirectory to start in, relative to `root`.
+        """
+        ...
 
 
 def build_walker(
@@ -64,6 +85,25 @@ def can_make_symlinks() -> bool:
             return False
 
     return True
+
+
+def check_walk_can_start(
+    walker: Walker,
+    root: os.PathLike[str] | str,
+    *,
+    start: os.PathLike[str] | str = ".",
+) -> None:
+    """Check that a walk can start, with `Walker.check_walk_can_start`.
+
+    Args:
+        walker: The walker to check with.
+        root: Path to the directory to walk.
+        start: Path to the subdirectory to start in, relative to `root`.
+    """
+    walker.check_walk_can_start(
+        root,
+        start=start,
+    )
 
 
 def format_pattern(pattern: Pattern) -> str:
@@ -443,6 +483,25 @@ def skip_if_windows_git_warns(root: Path, ignore_filename: str) -> None:
 
     if any(path.is_dir() for path in root.rglob(ignore_filename)):
         skip("Git for Windows can't open a directory named like the ignore-file")
+
+
+def start_walk(
+    walker: Walker,
+    root: os.PathLike[str] | str,
+    *,
+    start: os.PathLike[str] | str = ".",
+) -> None:
+    """Check that a walk can start, by starting it without taking a step.
+
+    Args:
+        walker: The walker to walk with.
+        root: Path to the directory to walk.
+        start: Path to the subdirectory to start in, relative to `root`.
+    """
+    walker.walk(
+        root,
+        start=start,
+    )
 
 
 def symlink_target(path: Path) -> Path:
