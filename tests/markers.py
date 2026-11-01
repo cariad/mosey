@@ -5,8 +5,21 @@ import sys
 
 from pytest import mark
 
-from tests.file_system_helpers import symlinks_allowed
+from tests.file_system_helpers import check_walk_can_start, start_walk, symlinks_allowed
 from tests.git_oracle import MINIMUM_VERSION, has_git
+
+each_check = mark.parametrize(
+    "check",
+    [
+        check_walk_can_start,
+        start_walk,
+    ],
+)
+"""Runs a test once for each way to check that a walk can start.
+
+`walk` runs its checks before it returns its iterator, and `check_walk_can_start` runs
+exactly the same checks, so a test of a check expects the same of both.
+"""
 
 needs_fifos = mark.skipif(
     not hasattr(os, "mkfifo"),

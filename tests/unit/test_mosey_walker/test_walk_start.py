@@ -1,4 +1,8 @@
-"""Unit tests for the `MoseyWalker.walk` function with a directory to start in."""
+"""Unit tests for the `MoseyWalker.walk` function with a directory to start in.
+
+The tests of `walk`'s checks test `MoseyWalker.check_walk_can_start` too, which runs
+exactly the same checks.
+"""
 
 import errno
 import os
@@ -13,6 +17,7 @@ from pytest import MonkeyPatch, fail, mark, param, raises
 
 from mosey import Mosey
 from tests.file_system_helpers import (
+    Check,
     build_walker,
     make_broken_symlink,
     make_fifo,
@@ -29,6 +34,7 @@ from tests.file_system_helpers import (
 )
 from tests.git_oracle import git_list_files
 from tests.markers import (
+    each_check,
     needs_fifos,
     needs_git,
     needs_junctions,
@@ -262,6 +268,7 @@ def test_walk__start__backslashes(tmp_path: Path) -> None:
     assert [step.relative_as_posix for step in steps] == ["a/b/c.txt"]
 
 
+@each_check
 @mark.parametrize(
     "make",
     [
@@ -275,6 +282,7 @@ def test_walk__start__backslashes(tmp_path: Path) -> None:
 def test_walk__start__beneath_a_non_directory(
     tmp_path: Path,
     make: Callable[[Path], None],
+    check: Check,
 ) -> None:
     """`FileNotFoundError` is raised when the start is beneath anything but a directory.
 
@@ -296,16 +304,28 @@ def test_walk__start__beneath_a_non_directory(
     )
 
     with guard, raises(FileNotFoundError) as raised:
-        Mosey().build().walk(tmp_path, start="a/b/c")
+        check(
+            Mosey().build(),
+            tmp_path,
+            start="a/b/c",
+        )
 
     assert raised.value.errno == errno.ENOENT
     assert raised.value.filename == os.fspath(tmp_path / "a" / "b" / "c")
 
 
-def test_walk__start__checked_before_root(tmp_path: Path) -> None:
+@each_check
+def test_walk__start__checked_before_root(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """The start's shape is checked before the root is."""
     with raises(ValueError, match="isn't a path beneath the root"):
-        Mosey().build().walk(tmp_path / "missing", start="/a")
+        check(
+            Mosey().build(),
+            tmp_path / "missing",
+            start="/a",
+        )
 
 
 def test_walk__start__checked_eagerly(tmp_path: Path) -> None:
@@ -328,8 +348,9 @@ def test_walk__start__default(tmp_path: Path) -> None:
     assert [s.relative_as_posix for s in walker.walk(tmp_path, start=".")] == expect
 
 
+@each_check
 @mark.skipif(sys.platform == "win32", reason="Windows has no /dev/null")
-def test_walk__start__device() -> None:
+def test_walk__start__device(check: Check) -> None:
     """A device is never a candidate, but it exists, so it isn't a directory.
 
     Only the root user can create a device, so this uses the one every Linux and macOS
@@ -340,44 +361,78 @@ def test_walk__start__device() -> None:
     walker = Mosey().build()
 
     with raises(NotADirectoryError) as not_a_directory:
-        walker.walk("/dev", start="null")
+        check(
+            walker,
+            "/dev",
+            start="null",
+        )
 
     assert not_a_directory.value.errno == errno.ENOTDIR
     assert not_a_directory.value.filename == "/dev/null"
 
     with raises(FileNotFoundError) as not_found:
-        walker.walk("/dev", start="null/a")
+        check(
+            walker,
+            "/dev",
+            start="null/a",
+        )
 
     assert not_found.value.errno == errno.ENOENT
     assert not_found.value.filename == "/dev/null/a"
 
 
+@each_check
 @mark.parametrize("start", ["a/b", "a/b/c"])
-def test_walk__start__does_not_exist(tmp_path: Path, start: str) -> None:
+def test_walk__start__does_not_exist(
+    tmp_path: Path,
+    start: str,
+    check: Check,
+) -> None:
     """`FileNotFoundError` is raised when the start doesn't exist."""
     make_tree(tmp_path, "a/")
 
     with raises(FileNotFoundError) as raised:
-        Mosey().build().walk(tmp_path, start=start)
+        check(
+            Mosey().build(),
+            tmp_path,
+            start=start,
+        )
 
     assert raised.value.errno == errno.ENOENT
 
 
+@each_check
 @mark.skipif(sys.platform != "win32", reason="Only Windows has drives")
-def test_walk__start__drive(tmp_path: Path) -> None:
+def test_walk__start__drive(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """`ValueError` is raised when the start has a drive."""
     root = tmp_path / "root"
     make_tree(root, "sub/file.txt")
 
     with raises(ValueError, match="isn't a path beneath the root"):
-        Mosey().build().walk(root, start=(root / "sub").as_posix())
+        check(
+            Mosey().build(),
+            root,
+            start=(root / "sub").as_posix(),
+        )
 
     with raises(ValueError, match="isn't a path beneath the root"):
-        Mosey().build().walk(root, start=Path(tmp_path.drive, "sub"))
+        check(
+            Mosey().build(),
+            root,
+            start=Path(tmp_path.drive, "sub"),
+        )
 
 
+@each_check
 @mark.skipif(sys.platform != "win32", reason="Only Windows has drives")
-def test_walk__start__drive_in_a_name(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+def test_walk__start__drive_in_a_name(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    check: Check,
+) -> None:
     """A name partway down that looks like a drive is looked for beneath the root."""
     root = tmp_path / "root"
     make_tree(root, "a/", "sub/file.txt")
@@ -389,13 +444,25 @@ def test_walk__start__drive_in_a_name(tmp_path: Path, monkeypatch: MonkeyPatch) 
     start = "a/" + (root / "sub").as_posix()
 
     with raises(OSError):
-        Mosey().build().walk(root, start=start)
+        check(
+            Mosey().build(),
+            root,
+            start=start,
+        )
 
 
-def test_walk__start__empty(tmp_path: Path) -> None:
+@each_check
+def test_walk__start__empty(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """`FileNotFoundError` is raised when the start is empty, as for the root."""
     with raises(FileNotFoundError) as raised:
-        Mosey().build().walk(tmp_path, start="")
+        check(
+            Mosey().build(),
+            tmp_path,
+            start="",
+        )
 
     assert raised.value.errno == errno.ENOENT
     assert raised.value.filename == ""
@@ -434,26 +501,43 @@ def test_walk__start__lazy(tmp_path: Path) -> None:
     assert list(steps) == []
 
 
-def test_walk__start__missing(tmp_path: Path) -> None:
+@each_check
+def test_walk__start__missing(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """`FileNotFoundError` names the first missing directory."""
     make_tree(tmp_path, "a/")
 
     with raises(FileNotFoundError) as raised:
-        Mosey().build().walk(tmp_path, start="a/b/c")
+        check(
+            Mosey().build(),
+            tmp_path,
+            start="a/b/c",
+        )
 
     assert raised.value.errno == errno.ENOENT
     assert raised.value.filename == os.fspath(tmp_path / "a" / "b")
 
 
-def test_walk__start__missing_beneath_ignored(tmp_path: Path) -> None:
+@each_check
+def test_walk__start__missing_beneath_ignored(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """A start that doesn't exist raises, even when a directory above it is ignored."""
     write_ignore_files(tmp_path, {"": ["a/"]})
     make_tree(tmp_path, "a/")
 
     with raises(FileNotFoundError):
-        build_walker("ignore").walk(tmp_path, start="a/b")
+        check(
+            build_walker("ignore"),
+            tmp_path,
+            start="a/b",
+        )
 
 
+@each_check
 @mark.parametrize(
     "make",
     [
@@ -468,6 +552,7 @@ def test_walk__start__missing_beneath_ignored(tmp_path: Path) -> None:
 def test_walk__start__not_a_directory(
     tmp_path: Path,
     make: Callable[[Path], None],
+    check: Check,
 ) -> None:
     """`NotADirectoryError` is raised when the start is anything but a directory.
 
@@ -485,34 +570,56 @@ def test_walk__start__not_a_directory(
     )
 
     with guard, raises(NotADirectoryError) as raised:
-        Mosey().build().walk(tmp_path, start="a/b")
+        check(
+            Mosey().build(),
+            tmp_path,
+            start="a/b",
+        )
 
     assert raised.value.errno == errno.ENOTDIR
     assert raised.value.filename == os.fspath(tmp_path / "a" / "b")
 
 
+@each_check
 @mark.parametrize("start", ["/", "/a", "..", "a/..", "a/../a", Path("/a")])
 def test_walk__start__not_beneath_the_root(
     tmp_path: Path,
     start: os.PathLike[str] | str,
+    check: Check,
 ) -> None:
     """`ValueError` is raised when the start isn't a path beneath the root."""
     make_tree(tmp_path, "a/b/")
 
     with raises(ValueError, match="isn't a path beneath the root"):
-        Mosey().build().walk(tmp_path, start=start)
+        check(
+            Mosey().build(),
+            tmp_path,
+            start=start,
+        )
 
 
-def test_walk__start__null_character(tmp_path: Path) -> None:
+@each_check
+def test_walk__start__null_character(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """`ValueError` is raised when the start holds a null character, as for the root."""
     make_tree(tmp_path, "a/")
 
     with raises(ValueError):
-        Mosey().build().walk(tmp_path, start="a/\x00")
+        check(
+            Mosey().build(),
+            tmp_path,
+            start="a/\x00",
+        )
 
 
+@each_check
 @needs_posix_permissions
-def test_walk__start__parent_listing_is_denied(tmp_path: Path) -> None:
+def test_walk__start__parent_listing_is_denied(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """`PermissionError` is raised when permissions deny listing a start's parent."""
     make_tree(tmp_path, "a/b/c.txt")
     walker = build_walker("ignore")
@@ -523,7 +630,12 @@ def test_walk__start__parent_listing_is_denied(tmp_path: Path) -> None:
 
     try:
         with raises(PermissionError) as raised:
-            walker.walk(tmp_path, start="a/b")
+            check(
+                walker,
+                tmp_path,
+                start="a/b",
+            )
+
     finally:
         # Restore access so pytest can clean up `tmp_path`.
         (tmp_path / "a").chmod(0o700)
@@ -531,8 +643,12 @@ def test_walk__start__parent_listing_is_denied(tmp_path: Path) -> None:
     assert raised.value.filename == os.fspath(tmp_path / "a")
 
 
+@each_check
 @needs_posix_permissions
-def test_walk__start__preflight_is_denied(tmp_path: Path) -> None:
+def test_walk__start__preflight_is_denied(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """`PermissionError` is raised when permissions deny listing the start."""
     make_tree(tmp_path, "a/b/c.txt")
 
@@ -542,7 +658,12 @@ def test_walk__start__preflight_is_denied(tmp_path: Path) -> None:
 
     try:
         with raises(PermissionError) as raised:
-            Mosey().build().walk(tmp_path, start="a/b")
+            check(
+                Mosey().build(),
+                tmp_path,
+                start="a/b",
+            )
+
     finally:
         # Restore access so pytest can clean up `tmp_path`.
         (tmp_path / "a" / "b").chmod(0o700)
@@ -627,6 +748,7 @@ def test_walk__start__siblings_not_listed(tmp_path: Path) -> None:
     assert [step.relative_as_posix for step in steps] == ["a/b/c.txt"]
 
 
+@each_check
 @mark.parametrize(
     ("start", "missing"),
     [
@@ -639,6 +761,7 @@ def test_walk__start__spelled_differently(
     tmp_path: Path,
     start: str,
     missing: str,
+    check: Check,
 ) -> None:
     """`FileNotFoundError` is raised when a name isn't spelled as it's listed.
 
@@ -649,14 +772,22 @@ def test_walk__start__spelled_differently(
 
     # macOS's file system keeps names as they're given, so "café" stays composed.
     with raises(FileNotFoundError) as raised:
-        Mosey().build().walk(tmp_path, start=start)
+        check(
+            Mosey().build(),
+            tmp_path,
+            start=start,
+        )
 
     assert raised.value.errno == errno.ENOENT
     assert raised.value.filename == os.fspath(tmp_path.joinpath(*missing.split("/")))
 
 
+@each_check
 @needs_posix_permissions
-def test_walk__start__stat_is_denied(tmp_path: Path) -> None:
+def test_walk__start__stat_is_denied(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """`PermissionError` is raised when permissions deny reaching the start."""
     make_tree(tmp_path, "a/b/c.txt")
 
@@ -665,7 +796,12 @@ def test_walk__start__stat_is_denied(tmp_path: Path) -> None:
 
     try:
         with raises(PermissionError):
-            Mosey().build().walk(tmp_path, start="a/b")
+            check(
+                Mosey().build(),
+                tmp_path,
+                start="a/b",
+            )
+
     finally:
         # Restore access so pytest can clean up `tmp_path`.
         (tmp_path / "a").chmod(0o700)
@@ -686,6 +822,33 @@ def test_walk__start__steps(tmp_path: Path, ignore_filename: str | None) -> None
         tmp_path / "a" / "b" / "d" / "e.txt",
     ]
     assert [step.root for step in steps] == [tmp_path, tmp_path]
+
+
+@each_check
+@needs_symlinks
+@mark.parametrize("ignore_symlinks", [False, True])
+def test_walk__start__symlink_when_ignoring_symlinks(
+    tmp_path: Path,
+    ignore_symlinks: bool,
+    check: Check,
+) -> None:
+    """A symlinked start raises the same whether or not the walker ignores symlinks."""
+    make_tree(tmp_path, "a/")
+    make_symlink_to_directory(tmp_path / "a" / "b")
+    walker = build_walker(
+        "ignore",
+        ignore_symlinks=ignore_symlinks,
+    )
+
+    with raises(NotADirectoryError) as raised:
+        check(
+            walker,
+            tmp_path,
+            start="a/b",
+        )
+
+    assert raised.value.errno == errno.ENOTDIR
+    assert raised.value.filename == os.fspath(tmp_path / "a" / "b")
 
 
 @needs_junctions

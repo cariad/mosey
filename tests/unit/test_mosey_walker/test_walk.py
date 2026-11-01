@@ -1,4 +1,8 @@
-"""Unit tests for the `MoseyWalker.walk` function."""
+"""Unit tests for the `MoseyWalker.walk` function.
+
+The tests of `walk`'s checks test `MoseyWalker.check_walk_can_start` too, which runs
+exactly the same checks.
+"""
 
 import errno
 import os
@@ -11,6 +15,7 @@ from pytest import MonkeyPatch, mark, param, raises
 
 from mosey import Mosey
 from tests.file_system_helpers import (
+    Check,
     build_walker,
     make_broken_symlink,
     make_directory,
@@ -25,6 +30,7 @@ from tests.file_system_helpers import (
     write_ignore_files,
 )
 from tests.markers import (
+    each_check,
     needs_fifos,
     needs_posix_permissions,
     needs_symlinks,
@@ -33,6 +39,7 @@ from tests.markers import (
 from tests.timeouts import alarm
 
 
+@each_check
 @mark.parametrize(
     "make",
     [
@@ -40,52 +47,78 @@ from tests.timeouts import alarm
         make_nothing,
     ],
 )
-def test_root_does_not_exist(tmp_path: Path, make: Callable[[Path], None]) -> None:
+def test_root_does_not_exist(
+    tmp_path: Path,
+    make: Callable[[Path], None],
+    check: Check,
+) -> None:
     """`FileNotFoundError` is raised when the root doesn't exist."""
     root = tmp_path / "nope"
     make(root)
 
     with raises(FileNotFoundError):
-        Mosey().build().walk(root)
+        check(
+            Mosey().build(),
+            root,
+        )
 
 
-def test_root_is_empty() -> None:
+@each_check
+def test_root_is_empty(check: Check) -> None:
     """`FileNotFoundError` is raised when the root is an empty string."""
     with raises(FileNotFoundError) as raised:
-        Mosey().build().walk("")
+        check(
+            Mosey().build(),
+            "",
+        )
 
     assert raised.value.errno == errno.ENOENT
     assert raised.value.filename == ""
 
 
-def test_root_is_beneath_a_file(tmp_path: Path) -> None:
+@each_check
+def test_root_is_beneath_a_file(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """`FileNotFoundError` is raised when one of the root's parents is a file."""
     parent = tmp_path / "parent"
     make_file(parent)
     root = parent / "root"
 
     with raises(FileNotFoundError) as raised:
-        Mosey().build().walk(root)
+        check(
+            Mosey().build(),
+            root,
+        )
 
     assert raised.value.errno == errno.ENOENT
     assert raised.value.filename == os.fspath(root)
 
 
+@each_check
 @mark.skipif(
     sys.platform == "win32",
     reason="Windows raises `FileNotFoundError` itself, so there's no cause to keep",
 )
-def test_root_is_beneath_a_file__cause(tmp_path: Path) -> None:
+def test_root_is_beneath_a_file__cause(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """Linux and macOS keep the original `NotADirectoryError` as the cause."""
     parent = tmp_path / "parent"
     make_file(parent)
 
     with raises(FileNotFoundError) as raised:
-        Mosey().build().walk(parent / "root")
+        check(
+            Mosey().build(),
+            parent / "root",
+        )
 
     assert isinstance(raised.value.__cause__, NotADirectoryError)
 
 
+@each_check
 @mark.parametrize(
     "make",
     [
@@ -101,7 +134,11 @@ def test_root_is_beneath_a_file__cause(tmp_path: Path) -> None:
         param(make_symlink_to_file, marks=needs_symlinks),
     ],
 )
-def test_root_is_not_a_directory(tmp_path: Path, make: Callable[[Path], None]) -> None:
+def test_root_is_not_a_directory(
+    tmp_path: Path,
+    make: Callable[[Path], None],
+    check: Check,
+) -> None:
     """`NotADirectoryError` is raised when the root isn't a directory."""
     root = tmp_path / "root"
     make(root)
@@ -115,13 +152,20 @@ def test_root_is_not_a_directory(tmp_path: Path, make: Callable[[Path], None]) -
     )
 
     with guard, raises(NotADirectoryError) as raised:
-        Mosey().build().walk(root)
+        check(
+            Mosey().build(),
+            root,
+        )
 
     assert raised.value.errno == errno.ENOTDIR
     assert raised.value.filename == os.fspath(root)
 
 
-def test_root_is_not_a_directory__trailing_separator(tmp_path: Path) -> None:
+@each_check
+def test_root_is_not_a_directory__trailing_separator(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """`NotADirectoryError` is raised when a file root has a trailing separator."""
     root = tmp_path / "root"
     make_file(root)
@@ -131,28 +175,42 @@ def test_root_is_not_a_directory__trailing_separator(tmp_path: Path) -> None:
     # a file, which `walk` normalises to `FileNotFoundError`. Passing a string proves
     # that `walk` strips the separator before it can be confused by that.
     with raises(NotADirectoryError) as raised:
-        Mosey().build().walk(os.fspath(root) + os.sep)
+        check(
+            Mosey().build(),
+            os.fspath(root) + os.sep,
+        )
 
     assert raised.value.errno == errno.ENOTDIR
     assert raised.value.filename == os.fspath(root)
 
 
+@each_check
 @needs_symlinks
-def test_root_is_a_symlink_loop(tmp_path: Path) -> None:
+def test_root_is_a_symlink_loop(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """`OSError` is raised when the root is a loop of symlinks."""
     root = tmp_path / "root"
     root.symlink_to(root)
 
     with raises(OSError) as raised:
-        Mosey().build().walk(root)
+        check(
+            Mosey().build(),
+            root,
+        )
 
     # Exactly `OSError`, and not a subclass like `FileNotFoundError`: something exists
     # at the path, but it can't be resolved.
     assert type(raised.value) is OSError
 
 
+@each_check
 @needs_posix_permissions
-def test_root_stat_is_denied(tmp_path: Path) -> None:
+def test_root_stat_is_denied(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """`PermissionError` is raised when permissions deny the stat of the root."""
     parent = tmp_path / "parent"
     root = parent / "root"
@@ -169,14 +227,22 @@ def test_root_stat_is_denied(tmp_path: Path) -> None:
             os.stat(root)
 
         with raises(PermissionError):
-            Mosey().build().walk(root)
+            check(
+                Mosey().build(),
+                root,
+            )
+
     finally:
         # Restore access so pytest can clean up `tmp_path`.
         parent.chmod(0o700)
 
 
+@each_check
 @needs_posix_permissions
-def test_root_preflight_is_denied(tmp_path: Path) -> None:
+def test_root_preflight_is_denied(
+    tmp_path: Path,
+    check: Check,
+) -> None:
     """`PermissionError` is raised when permissions deny the preflight of the root."""
     root = tmp_path / "root"
     root.mkdir()
@@ -190,7 +256,11 @@ def test_root_preflight_is_denied(tmp_path: Path) -> None:
         os.stat(root)
 
         with raises(PermissionError):
-            Mosey().build().walk(root)
+            check(
+                Mosey().build(),
+                root,
+            )
+
     finally:
         # Restore access so pytest can clean up `tmp_path`.
         root.chmod(0o700)
@@ -220,6 +290,29 @@ def test_root_search_is_denied(tmp_path: Path) -> None:
     finally:
         # Restore access so pytest can clean up `tmp_path`.
         root.chmod(0o700)
+
+
+@each_check
+@mark.skipif(
+    sys.platform == "win32",
+    reason="Windows can't delete the working directory",
+)
+def test_root_working_directory_is_deleted(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+    check: Check,
+) -> None:
+    """A relative root raises `FileNotFoundError` if the working directory is gone."""
+    working_directory = tmp_path / "gone"
+    working_directory.mkdir()
+    monkeypatch.chdir(working_directory)
+    working_directory.rmdir()
+
+    with raises(FileNotFoundError):
+        check(
+            Mosey().build(),
+            "root",
+        )
 
 
 def test_walk__ascending_paths(tmp_path: Path) -> None:

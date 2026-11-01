@@ -96,6 +96,170 @@ class MoseyWalker:
             ignore_filename is not None or bool(heavy_layers) or bool(light_layers)
         )
 
+    def _check_walk_can_start(
+        self,
+        root: os.PathLike[str] | str,
+        start: os.PathLike[str] | str,
+    ) -> tuple[Path, tuple[str, ...]]:
+        """Check that a walk can start, and return its root's path and start's names.
+
+        `walk` and `check_walk_can_start` both check with this, so that neither accepts
+        what the other refuses.
+
+        Args:
+            root: Path to the directory to walk.
+            start: Path to the subdirectory to start in, relative to `root`.
+
+        Returns:
+            The path to the directory to walk, and the names of the directories to pass
+            through to reach the directory to start in, outermost first.
+
+        Raises:
+            OSError: As documented by the `Walker` protocol's `walk`.
+            ValueError: As documented by the `Walker` protocol's `walk`.
+        """
+        # The path to start in is checked before the file system is touched.
+        names = split_start(start)
+
+        # `Path` normalises an empty string to ".", which would walk the current working
+        # directory. This feels a bit unexpected, so we'll protect the user and have
+        # them pass an explicit "." if that's what they want.
+        #
+        # `os.stat("")` would raise `FileNotFoundError`, so we'll do the same.
+        if not os.fspath(root):
+            raise_file_not_found("")
+
+        # This probably looks like we've just taken a string, converted it to a `Path`,
+        # then converted it back to a string -- but *this* string was cleaned up and
+        # normalised by the `Path` conversion, so it's in a good state for walking.
+        #
+        # We need the string to use the file system's native path separators, so we
+        # can't use `root_path.as_posix()`.
+        #
+        # We *could* use `str(root_path)`, which pathlib documents as the native file
+        # system path, but `os.fspath` makes the intent explicit: we want the path
+        # string, not just *any* string representation.
+        root_path = Path(root)
+        root_str = os.fspath(root_path)
+
+        # A relative root is found from the working directory, so check that the working
+        # directory still exists. If it's been deleted, `os.getcwd` raises
+        # `FileNotFoundError`; without this check, the walk would quietly find nothing.
+        if not root_path.is_absolute():
+            os.getcwd()
+
+        # Will raise:
+        #  - `FileNotFoundError` if there's nothing there.
+        #  - `PermissionError` if permissions deny searching one of the root's parents.
+        #    `stat` doesn't need permission to read the root itself; we check that
+        #    further down.
+        try:
+            root_stat = os.stat(root_str)
+
+        except NotADirectoryError as error:
+            # One of the root's parents isn't a directory (say, "README.md/docs"), so
+            # the root can't exist.
+            #
+            # POSIX reports that as "not a directory" while Windows reports "not found".
+            #
+            # No object exists at the path either way, so we normalise to
+            # `FileNotFoundError` for consistency across platforms.
+            #
+            # This can't be confused with the root itself not being a directory;
+            # `os.stat` succeeds for that, and we check for it below. That relies on
+            # `Path` having stripped any trailing separator above, because POSIX reports
+            # "file/" as "not a directory" too.
+            #
+            # We pass the original error along as the cause so the traceback still shows
+            # that a parent isn't a directory.
+            raise_file_not_found(
+                root_str,
+                error,
+            )
+
+        # We check `stat.S_ISDIR` instead of `root_path.is_dir()` because `is_dir`
+        # handles permissions failures a bit differently between Python releases
+        # (raising the exception vs swallowing and returning `False`).
+        #
+        # And `is_dir` calls `os.stat` anyway, which we've already done to check if the
+        # object exists, so we may as well reuse the result we've already got.
+        if not stat.S_ISDIR(root_stat.st_mode):
+            raise NotADirectoryError(
+                errno.ENOTDIR,
+                os.strerror(errno.ENOTDIR),
+                root_str,
+            )
+
+        # A preflight check to see if we've got permission to list the directory. We
+        # won't actually start iterating, so it'll be quick. `scandir` will raise
+        # `PermissionError` if we're not allowed to look.
+        with os.scandir(root_str):
+            pass
+
+        # The directory to start in is checked one name at a time, by looking for each
+        # name in its directory's listing, spelled exactly as the file system spells
+        # it, and never following a symlink, because a walk of the root would never
+        # walk into one. Like the root, a directory to start in that can't exist raises
+        # `FileNotFoundError`, and one that isn't a directory raises
+        # `NotADirectoryError`.
+        #
+        # Each name is only joined on with `os.path.join` once it's found in the
+        # listing. Joining one that isn't there would throw away everything before it on
+        # Windows if it had a drive, like "C:", so an error names its path by adding it
+        # after a separator instead. Joining nothing to the root first ends it with a
+        # separator, unless it already ends with one, like "/" or "C:\\".
+        base = os.path.join(
+            root_str,
+            "",
+        )
+
+        start_str = root_str
+
+        for index, name in enumerate(names):
+            # One scan finds the name and says whether it's a directory, so the answers
+            # can't disagree if the directory changes. Looking up the path instead would
+            # find a name spelled differently, like "B" for "b", on a file system that
+            # ignores case.
+            #
+            # A directory is what `list_candidates` lists as one. If it ever lists
+            # special files too (https://github.com/cariad/mosey/issues/42), this could
+            # look in its listing instead.
+            with os.scandir(start_str) as entries:
+                entry = next((entry for entry in entries if entry.name == name), None)
+                is_directory = entry is not None and entry.is_dir(follow_symlinks=False)
+
+            if is_directory:
+                start_str = os.path.join(
+                    start_str,
+                    name,
+                )
+
+                continue
+
+            path = base + os.sep.join(names[: index + 1])
+
+            if entry is None:
+                raise_file_not_found(path)
+
+            # Something has the name, but it isn't a directory: it's a file, a symlink,
+            # or something that's never a candidate, like a FIFO, a socket, or a device.
+            # Something beneath it can't be walked to, so it can't exist as far as the
+            # walk is concerned.
+            if index < len(names) - 1:
+                raise_file_not_found(base + os.sep.join(names))
+
+            raise NotADirectoryError(
+                errno.ENOTDIR,
+                os.strerror(errno.ENOTDIR),
+                path,
+            )
+
+        if names:
+            with os.scandir(start_str):
+                pass
+
+        return root_path, names
+
     def _iterate(
         self,
         root: Path,
@@ -282,6 +446,18 @@ class MoseyWalker:
 
         return candidates, layers
 
+    def check_walk_can_start(
+        self,
+        root: os.PathLike[str] | str,
+        *,
+        start: os.PathLike[str] | str = ".",
+    ) -> None:
+        """Check that a walk can start, as documented by the `Walker` protocol."""
+        self._check_walk_can_start(
+            root,
+            start,
+        )
+
     def walk(
         self,
         root: os.PathLike[str] | str,
@@ -289,138 +465,15 @@ class MoseyWalker:
         start: os.PathLike[str] | str = ".",
     ) -> Iterator[Step]:
         """Walk a directory, as documented by the `Walker` protocol's `walk`."""
-        # The path to start in is checked before the file system is touched.
-        names = split_start(start)
-
-        # `Path` normalises an empty string to ".", which would walk the current working
-        # directory. This feels a bit unexpected, so we'll protect the user and have
-        # them pass an explicit "." if that's what they want.
-        #
-        # `os.stat("")` would raise `FileNotFoundError`, so we'll do the same.
-        if not os.fspath(root):
-            raise_file_not_found("")
-
-        # This probably looks like we've just taken a string, converted it to a `Path`,
-        # then converted it back to a string -- but *this* string was cleaned up and
-        # normalised by the `Path` conversion, so it's in a good state for walking.
-        #
-        # We need the string to use the file system's native path separators, so we
-        # can't use `root_path.as_posix()`.
-        #
-        # We *could* use `str(root_path)`, which pathlib documents as the native file
-        # system path, but `os.fspath` makes the intent explicit: we want the path
-        # string, not just *any* string representation.
-        root_path = Path(root)
-        root_str = os.fspath(root_path)
-
-        # A relative root is found from the working directory, so check that the working
-        # directory still exists. If it's been deleted, `os.getcwd` raises
-        # `FileNotFoundError`; without this check, the walk would quietly find nothing.
-        if not root_path.is_absolute():
-            os.getcwd()
-
-        # Will raise:
-        #  - `FileNotFoundError` if there's nothing there.
-        #  - `PermissionError` if permissions deny searching one of the root's parents.
-        #    `stat` doesn't need permission to read the root itself; we check that
-        #    further down.
-        try:
-            root_stat = os.stat(root_str)
-        except NotADirectoryError as error:
-            # One of the root's parents isn't a directory (say, "README.md/docs"), so
-            # the root can't exist.
-            #
-            # POSIX reports that as "not a directory" while Windows reports "not found".
-            #
-            # No object exists at the path either way, so we normalise to
-            # `FileNotFoundError` for consistency across platforms.
-            #
-            # This can't be confused with the root itself not being a directory;
-            # `os.stat` succeeds for that, and we check for it below. That relies on
-            # `Path` having stripped any trailing separator above, because POSIX reports
-            # "file/" as "not a directory" too.
-            #
-            # We pass the original error along as the cause so the traceback still shows
-            # that a parent isn't a directory.
-            raise_file_not_found(root_str, error)
-
-        # We check `stat.S_ISDIR` instead of `root_path.is_dir()` because `is_dir`
-        # handles permissions failures a bit differently between Python releases
-        # (raising the exception vs swallowing and returning `False`).
-        #
-        # And `is_dir` calls `os.stat` anyway, which we've already done to check if the
-        # object exists, so we may as well reuse the result we've already got.
-        if not stat.S_ISDIR(root_stat.st_mode):
-            raise NotADirectoryError(
-                errno.ENOTDIR,
-                os.strerror(errno.ENOTDIR),
-                root_str,
-            )
-
-        # A preflight check to see if we've got permission to list the directory. We
-        # won't actually start iterating, so it'll be quick. `scandir` will raise
-        # `PermissionError` if we're not allowed to look.
-        with os.scandir(root_str):
-            pass
-
-        # The directory to start in is checked one name at a time, by looking for each
-        # name in its directory's listing, spelled exactly as the file system spells
-        # it, and never following a symlink, because a walk of the root would never
-        # walk into one. Like the root, a directory to start in that can't exist raises
-        # `FileNotFoundError`, and one that isn't a directory raises
-        # `NotADirectoryError`.
-        #
-        # Each name is only joined on with `os.path.join` once it's found in the
-        # listing. Joining one that isn't there would throw away everything before it on
-        # Windows if it had a drive, like "C:", so an error names its path by adding it
-        # after a separator instead. Joining nothing to the root first ends it with a
-        # separator, unless it already ends with one, like "/" or "C:\\".
-        base = os.path.join(root_str, "")
-        start_str = root_str
-
-        for index, name in enumerate(names):
-            # One scan finds the name and says whether it's a directory, so the answers
-            # can't disagree if the directory changes. Looking up the path instead would
-            # find a name spelled differently, like "B" for "b", on a file system that
-            # ignores case.
-            #
-            # A directory is what `list_candidates` lists as one. If it ever lists
-            # special files too (https://github.com/cariad/mosey/issues/42), this could
-            # look in its listing instead.
-            with os.scandir(start_str) as entries:
-                entry = next((entry for entry in entries if entry.name == name), None)
-                is_directory = entry is not None and entry.is_dir(follow_symlinks=False)
-
-            if is_directory:
-                start_str = os.path.join(start_str, name)
-                continue
-
-            path = base + os.sep.join(names[: index + 1])
-
-            if entry is None:
-                raise_file_not_found(path)
-
-            # Something has the name, but it isn't a directory: it's a file, a symlink,
-            # or something that's never a candidate, like a FIFO, a socket, or a device.
-            # Something beneath it can't be walked to, so it can't exist as far as the
-            # walk is concerned.
-            if index < len(names) - 1:
-                raise_file_not_found(base + os.sep.join(names))
-
-            raise NotADirectoryError(
-                errno.ENOTDIR,
-                os.strerror(errno.ENOTDIR),
-                path,
-            )
-
-        if names:
-            with os.scandir(start_str):
-                pass
+        root_path, names = self._check_walk_can_start(
+            root,
+            start,
+        )
 
         # Validation is done, so hand over to the generator.
         #
         # We intentionally don't `yield` anything in this function so that the checks
-        # above run immediately rather than waiting for the first call to `next()`.
+        # run immediately rather than waiting for the first call to `next()`.
         return self._iterate(
             root_path,
             names,

@@ -66,6 +66,22 @@ It skips `docs/guides/install.log` because of `templates/.walkignore`, and `docs
 
 A walk with `start="docs/guides/drafts"` yields nothing, because a walk of `templates` would never walk into `docs/guides/drafts`.
 
+## Checking without walking
+
+To find out whether a walk can start, without walking, call [`Walker.check_walk_can_start`][mosey.Walker.check_walk_can_start] with the arguments you'd pass to `walk`:
+
+```python
+walker.check_walk_can_start(
+    "templates",
+    start="docs/guides",
+)
+```
+
+- It runs exactly the checks that `walk` runs before the walk begins, and raises exactly what `walk` raises for them: the same exceptions, naming the same paths.
+- It returns `None` when they pass, rather than `True` or `False`, so you always get the real error.
+- It lists nothing within `start`, and reads no ignore-files. So a walk that can start can still fail partway through, like when it can't list a directory deep within `start`, or can't read an ignore-file, even one above `start`.
+- A `start` that an ignore-file or pattern ignores passes the check, but the walk yields nothing.
+
 ## Behaviour you might not expect
 
 - **`start` is tidied up like a `Path`.** `"docs//guides/"` and `"./docs/guides"` both start in `docs/guides`, and each step's `relative_as_posix` begins with `docs/guides/`.
